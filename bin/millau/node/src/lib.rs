@@ -20,7 +20,7 @@
 mod chain_spec;
 #[macro_use]
 mod service;
-mod cli;
+pub mod cli;
 mod command;
 
 /// Node run result.

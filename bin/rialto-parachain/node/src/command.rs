@@ -36,11 +36,11 @@ use std::{io::Write, net::SocketAddr};
 
 fn load_spec(
 	id: &str,
-	para_id: ParaId,
+	para_id: Option<ParaId>,
 ) -> std::result::Result<Box<dyn sc_service::ChainSpec>, String> {
 	Ok(match id {
-		"dev" => Box::new(chain_spec::development_config(para_id)),
-		"" | "local" => Box::new(chain_spec::local_testnet_config(para_id)),
+		"dev" => Box::new(chain_spec::development_config(para_id.unwrap_or(2000.into()))),
+		"" | "local" => Box::new(chain_spec::local_testnet_config(para_id.unwrap_or(2000.into()))),
 		path => Box::new(chain_spec::ChainSpec::from_json_file(std::path::PathBuf::from(path))?),
 	})
 }
@@ -77,7 +77,7 @@ impl SubstrateCli for Cli {
 	}
 
 	fn load_spec(&self, id: &str) -> std::result::Result<Box<dyn sc_service::ChainSpec>, String> {
-		load_spec(id, self.parachain_id.unwrap_or(2000).into())
+		load_spec(id, self.parachain_id.map(Into::<ParaId>::into))
 	}
 
 	fn native_runtime_version(_: &Box<dyn ChainSpec>) -> &'static RuntimeVersion {
@@ -215,7 +215,7 @@ pub fn run() -> Result<()> {
 
 			let spec = load_spec(
 				&params.chain.clone().unwrap_or_default(),
-				params.parachain_id.expect("Missing ParaId").into(),
+				params.parachain_id.map(Into::<ParaId>::into),
 			)?;
 			let state_version = Cli::native_runtime_version(&spec).state_version();
 			let block: Block = generate_genesis_block(&*spec, state_version)?;

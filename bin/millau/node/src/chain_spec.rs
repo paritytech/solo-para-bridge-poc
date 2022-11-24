@@ -17,8 +17,8 @@
 use beefy_primitives::crypto::AuthorityId as BeefyId;
 use millau_runtime::{
 	AccountId, AuraConfig, BalancesConfig, BeefyConfig, BridgeRialtoMessagesConfig,
-	BridgeRialtoParachainMessagesConfig, BridgeWestendGrandpaConfig, GenesisConfig, GrandpaConfig,
-	SessionConfig, SessionKeys, Signature, SudoConfig, SystemConfig, WASM_BINARY,
+	BridgeRialtoParachainMessagesConfig, BridgeWestendGrandpaConfig, CouncilConfig, GenesisConfig,
+	GrandpaConfig, SessionConfig, SessionKeys, Signature, SudoConfig, SystemConfig, WASM_BINARY,
 };
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{sr25519, Pair, Public};
@@ -221,15 +221,21 @@ fn testnet_genesis(
 			..Default::default()
 		},
 		bridge_rialto_messages: BridgeRialtoMessagesConfig {
-			owner: Some(get_account_id_from_seed::<sr25519::Public>(RIALTO_MESSAGES_PALLET_OWNER)),
+			owner: Some(get_account_id_from_seed::<sr25519::Public>(SUDO_ACCOUNT)),
 			..Default::default()
 		},
 		bridge_rialto_parachain_messages: BridgeRialtoParachainMessagesConfig {
-			owner: Some(get_account_id_from_seed::<sr25519::Public>(
-				RIALTO_PARACHAIN_MESSAGES_PALLET_OWNER,
-			)),
+			owner: Some(get_account_id_from_seed::<sr25519::Public>(SUDO_ACCOUNT)),
 			..Default::default()
 		},
 		xcm_pallet: Default::default(),
+		council: CouncilConfig {
+			phantom: Default::default(),
+			members: vec![
+				get_account_id_from_seed::<sr25519::Public>("Alice"),
+				get_account_id_from_seed::<sr25519::Public>("Bob"),
+				get_account_id_from_seed::<sr25519::Public>("Charlie"),
+			],
+		},
 	}
 }

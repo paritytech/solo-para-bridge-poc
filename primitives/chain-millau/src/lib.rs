@@ -32,7 +32,7 @@ use frame_system::limits;
 use scale_info::TypeInfo;
 use sp_core::{storage::StateVersion, Hasher as HasherT};
 use sp_runtime::{
-	traits::{IdentifyAccount, Verify},
+	traits::{BlakeTwo256, IdentifyAccount, Verify},
 	FixedU128, MultiSignature, MultiSigner, Perbill,
 };
 use sp_std::prelude::*;
@@ -125,13 +125,15 @@ pub mod time_units {
 }
 
 /// Block number type used in Millau.
-pub type BlockNumber = u64;
+pub type BlockNumber = u32;
 
 /// Hash type used in Millau.
-pub type Hash = <BlakeTwoAndKeccak256 as HasherT>::Out;
+// pub type Hash = <BlakeTwoAndKeccak256 as HasherT>::Out;
+pub type Hash = sp_core::H256;
 
 /// Type of object that can produce hashes on Millau.
-pub type Hasher = BlakeTwoAndKeccak256;
+// pub type Hasher = BlakeTwoAndKeccak256;
+pub type Hasher = BlakeTwo256;
 
 /// The header type used by Millau.
 pub type Header = sp_runtime::generic::Header<BlockNumber, Hasher>;

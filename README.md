@@ -1,4 +1,50 @@
-# Parity Bridges Common
+# Solo-Para Bridge PoC
+
+## Overview
+This repository is based on the `Parity Bridges Common` [repository](https://github.com/paritytech/parity-bridges-common) for a spike/POC on bridging.
+
+Here is the list of major changes on top of Parity Bridges Common:
+
+- `./bin/millau` contains some additional on-chain and off-chain functionality:
+  - Off-chain is responsible for retrieving some off-chain data and submitting it to the on-chain for further processing.
+  - After getting off-chain data, on-chain will do computation based on the business logic, and then send the final result to parachain.
+  - For more info please have a look at the millau's [readme](bin/millau/README.md).
+- `./bin/rialto-parachain` contains a pallet which is responsible for storing the data received from the solo-chain.
+- Add XCM bridging example to the runtimes/pallets
+
+## Some notes on running
+
+Take a look through the docs.
+
+## Deploying `rialto-parachain` with zombienet
+
+Before doing that, run this (builds binaries that are relevant for us):
+```bash
+make build-all
+```
+
+1. Build `rialto-bridge-node` in release mode
+2. Download `zombienet` binary release from `zombienet` [GitHub](https://github.com/paritytech/zombienet) page
+3. Move this binary to [this directory](deployments/zombienet)
+4. Configure the `rialto-bridge-node` relay chain binary path [here](deployments/zombienet/rialto-parachain.toml)
+5. Start with `make start-para(mac|linux)`
+6. Copy the port listed for collator1, which you will use for the `rialto-parachain-port` in a later command. Copy Alice's, Bob's, or Charlie's port, as you will use it for the `rialto-port` in a later command.
+
+## Starting the relay process
+1. Run millau node (`make start-millau`)
+2. Wait until the parachain is onboarded and starts producing blocks
+3. Run `make start-header-relay rialto-port={your port here} rialto-parachain-port={your other port here}`,
+
+## Observe the Pallet's message sending
+The existing LP pallet in the Millau runtime utilizes the Millau + Rialto-Parachain XCM configuration to send bridged XCM messages. It tries to do this after it reaches a certain internal state(See [README](bin/millau/README.md) for more). To quickly start the message-sending process:
+1. Open the Millau node in Polkadotjs
+2. Got to Accounts, copy Alice's public key
+3. Go to Developer > RPC Calls > author > insertKey
+4. keyType: pubK, suri: //Alice, publicKey (paste the key from your clipboard)
+5. Submit and observe the events. Wait for several rounds (HashRevealed events) to pass.
+6. In the Rialto parachain's polkadotjs, observe the xcm messages noted in the events
+
+## The docs
 
 This is a collection of components for building bridges.
 

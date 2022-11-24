@@ -24,3 +24,9 @@ hfuzz_workspace
 *.iml
 *.swp
 *.swo
+
+# remove zombienet from committed files
+deployments/zombienet/zombienet-*
+# these are the files related to the benchmark results
+pallets/*/src/benchmark_raw.json
+pallets/*/src/weights_new.rs

@@ -133,7 +133,7 @@ pub fn development_config(id: ParaId) -> ChainSpec {
 		None,
 		None,
 		Extensions {
-			relay_chain: "rococo-local".into(), // You MUST set this to the correct network!
+			relay_chain: "local".into(), // You MUST set this to the correct network!
 			para_id: id.into(),
 		},
 	)
@@ -165,7 +165,7 @@ pub fn local_testnet_config(id: ParaId) -> ChainSpec {
 		None,
 		None,
 		Extensions {
-			relay_chain: "rococo-local".into(), // You MUST set this to the correct network!
+			relay_chain: "local".into(), // You MUST set this to the correct network!
 			para_id: id.into(),
 		},
 	)
@@ -191,7 +191,7 @@ fn testnet_genesis(
 		aura: rialto_parachain_runtime::AuraConfig { authorities: initial_authorities },
 		aura_ext: Default::default(),
 		bridge_millau_messages: BridgeMillauMessagesConfig {
-			owner: Some(get_account_id_from_seed::<sr25519::Public>(MILLAU_MESSAGES_PALLET_OWNER)),
+			owner: Some(get_account_id_from_seed::<sr25519::Public>(SUDO_ACCOUNT)),
 			..Default::default()
 		},
 	}

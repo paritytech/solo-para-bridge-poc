@@ -1,0 +1,27 @@
+[package]
+name = "primitives"
+version = "0.2.0"
+authors = ["Parity Technologies <admin@parity.io>"]
+homepage = "https://parity.io/"
+license = "Unlicense"
+publish = false
+edition = "2021"
+
+[dependencies]
+sp-application-crypto = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.27", default-features = false  }
+scale-info = { version = "2.0.1", default-features = false, features = ["derive"] }
+codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false }
+sp-core = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.27", default-features = false }
+frame-system = { version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.27", default-features = false }
+sp-runtime = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.27", default-features = false  }
+
+[features]
+default = [ "std" ]
+std = [
+	"sp-application-crypto/std",
+	"scale-info/std",
+	"codec/std",
+	"sp-core/std",
+	"frame-system/std",
+	"sp-runtime/std",
+]

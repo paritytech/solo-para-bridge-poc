@@ -1,0 +1,27 @@
+[package]
+name = "runtime-api"
+version = "0.2.0"
+description = "A module for custom runtime API definition"
+authors = ["Parity Technologies <admin@parity.io>"]
+homepage = "https://parity.io/"
+license = "Unlicense"
+publish = false
+edition = "2021"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+sp-core = { default-features = false, version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.27" }
+sp-api = { git = "https://github.com/paritytech/substrate", default-features = false, branch = "polkadot-v0.9.27" }
+primitives = { version = "0.2.0", path = "../primitives", default-features = false }
+codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false, features = ["derive", "full", "bit-vec"]  }
+
+[features]
+default = [ "std" ]
+std = [
+	"sp-core/std",
+	"sp-api/std",
+	"primitives/std",
+	"codec/std"
+]

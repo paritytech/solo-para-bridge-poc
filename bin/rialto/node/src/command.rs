@@ -18,6 +18,7 @@ use crate::cli::{Cli, Subcommand};
 use frame_benchmarking_cli::BenchmarkCmd;
 use rialto_runtime::{Block, RuntimeApi};
 use sc_cli::{ChainSpec, RuntimeVersion, SubstrateCli};
+use std::path::PathBuf;
 
 impl SubstrateCli for Cli {
 	fn impl_name() -> String {
@@ -57,7 +58,7 @@ impl SubstrateCli for Cli {
 			match id {
 				"" | "dev" => crate::chain_spec::Alternative::Development,
 				"local" => crate::chain_spec::Alternative::LocalTestnet,
-				_ => return Err(format!("Unsupported chain specification: {}", id)),
+				file => crate::chain_spec::Alternative::File(PathBuf::from(file)),
 			}
 			.load(),
 		))

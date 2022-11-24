@@ -9,7 +9,7 @@ MILLAU_PORT="${MILLAU_PORT:-9945}"
 RIALTO_PORT="${RIALTO_PORT:-9944}"
 
 RUST_LOG=bridge=debug \
-./target/debug/substrate-relay relay-messages millau-to-rialto \
+./target/release/substrate-relay relay-messages millau-to-rialto-parachain \
 	--relayer-mode=altruistic \
 	--lane 00000000 \
 	--source-host localhost \
