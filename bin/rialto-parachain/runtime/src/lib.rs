@@ -593,7 +593,7 @@ match_types! {
 }
 
 impl pallet_x_chain::Config<pallet_x_chain::Instance1> for Runtime {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type SharedStateAccess = MillauSharedState;
 	type CrossChainOrigin = EnsureXcm<ChildSoloDLEChain>;
 }

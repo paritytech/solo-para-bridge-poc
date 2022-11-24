@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
-use clap::{ArgEnum, Parser};
+use clap::Parser;
 // use sc_cli::RunCmd;
 use std::fmt;
 
-#[derive(ArgEnum, Copy, Debug, Clone, PartialEq)]
+#[derive(clap::ArgEnum, Copy, Debug, Clone, PartialEq)]
 pub enum NodeProcessingRole {
 	LogicProvider,
 	None,

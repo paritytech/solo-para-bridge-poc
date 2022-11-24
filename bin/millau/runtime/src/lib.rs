@@ -181,14 +181,6 @@ parameter_types! {
 	pub const SS58Prefix: u8 = 60;
 }
 
-pub type WestendGrandpaInstance = pallet_bridge_grandpa::Instance1;
-impl pallet_bridge_grandpa::Config<WestendGrandpaInstance> for Runtime {
-	type BridgedChain = bp_westend::Westend;
-	type MaxRequests = MaxRequests;
-	type HeadersToKeep = HeadersToKeep;
-
-	type WeightInfo = pallet_bridge_grandpa::weights::MillauWeight<Runtime>;
-}
 
 impl frame_system::Config for Runtime {
 	/// The basic call filter to use in dispatchable.
@@ -657,7 +649,7 @@ parameter_types! {
 /// **NOTE**: this configuration is intended only for local development.
 /// It must be changed when running it as a parachain or in production mode.
 impl pallet_logic_provider::Config for Runtime {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type MaxCallPayloadLength = MaxCallPayloadLength;
 	type EnforceBurningTokens = EnforceBurningTokens;
 	type Reward = Reward;
@@ -671,10 +663,10 @@ impl pallet_logic_provider::Config for Runtime {
 
 impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
 where
-	Call: From<C>,
+	RuntimeCall: From<C>,
 {
 	type Extrinsic = UncheckedExtrinsic;
-	type OverarchingCall = Call;
+	type OverarchingCall = RuntimeCall;
 }
 
 parameter_types! {
@@ -695,9 +687,9 @@ parameter_types! {
 
 type CouncilCollective = pallet_collective::Instance1;
 impl pallet_collective::Config<CouncilCollective> for Runtime {
-	type Origin = Origin;
-	type Proposal = Call;
-	type Event = Event;
+	type RuntimeOrigin = RuntimeOrigin;
+	type Proposal = RuntimeCall;
+	type RuntimeEvent = RuntimeEvent;
 	type MotionDuration = CouncilMotionDuration;
 	type MaxProposals = CouncilMaxProposals;
 	type MaxMembers = CouncilMaxMembers;

@@ -61,16 +61,16 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	// Storage: LogicProvider MajorityType (r:1 w:0)
 	// Storage: Balances Locks (r:1 w:1)
 	fn commit_processing_result_hash() -> Weight {
-		(33_000_000 as Weight)
-			.saturating_add(T::DbWeight::get().reads(7 as Weight))
-			.saturating_add(T::DbWeight::get().writes(3 as Weight))
+		Weight::from_ref_time(33_000_000)
+			.saturating_add(T::DbWeight::get().reads(7))
+			.saturating_add(T::DbWeight::get().writes(3))
 	}
 	// Storage: Commitments RevealWindow (r:1 w:0)
 	// Storage: Commitments Commits (r:1 w:1)
 	fn reveal_processing_result_hash() -> Weight {
-		(15_000_000 as Weight)
-			.saturating_add(T::DbWeight::get().reads(2 as Weight))
-			.saturating_add(T::DbWeight::get().writes(1 as Weight))
+		Weight::from_ref_time(15_000_000)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
 	}
 	// Storage: LogicProvider CommitmentBlockNumbers (r:1 w:1)
 	// Storage: Commitments Commits (r:1 w:1)
@@ -79,13 +79,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	// Storage: LogicProvider RoundStates (r:0 w:1)
 	// Storage: LogicProvider ProcessedHashes (r:0 w:1)
 	fn issue_rewards_to_some_participants(s: u32) -> Weight {
-		(0 as Weight)
+		Weight::from_ref_time(0)
 			// Standard Error: 28_000
-			.saturating_add((13_797_000 as Weight).saturating_mul(s as Weight))
-			.saturating_add(T::DbWeight::get().reads(3 as Weight))
-			.saturating_add(T::DbWeight::get().reads((1 as Weight).saturating_mul(s as Weight)))
-			.saturating_add(T::DbWeight::get().writes(4 as Weight))
-			.saturating_add(T::DbWeight::get().writes((1 as Weight).saturating_mul(s as Weight)))
+			.saturating_add(Weight::from_ref_time(13_797_000).saturating_mul(s as u64))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().reads((1u64).saturating_mul(s as u64)))
+			.saturating_add(T::DbWeight::get().writes(4))
+			.saturating_add(T::DbWeight::get().writes((1u64).saturating_mul(s as u64)))
 	}
 	// Storage: LogicProvider CommitmentBlockNumbers (r:1 w:1)
 	// Storage: Commitments Commits (r:1 w:1)
@@ -94,42 +94,42 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	// Storage: LogicProvider RoundStates (r:0 w:1)
 	// Storage: LogicProvider ProcessedHashes (r:0 w:1)
 	fn issue_rewards_to_all_participants(s: u32) -> Weight {
-		(0 as Weight)
+		Weight::from_ref_time(0)
 			// Standard Error: 30_000
-			.saturating_add((15_022_000 as Weight).saturating_mul(s as Weight))
-			.saturating_add(T::DbWeight::get().reads(3 as Weight))
-			.saturating_add(T::DbWeight::get().reads((1 as Weight).saturating_mul(s as Weight)))
-			.saturating_add(T::DbWeight::get().writes(4 as Weight))
-			.saturating_add(T::DbWeight::get().writes((1 as Weight).saturating_mul(s as Weight)))
+			.saturating_add(Weight::from_ref_time(15_022_000).saturating_mul(s as u64))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().reads((1u64).saturating_mul(s as u64)))
+			.saturating_add(T::DbWeight::get().writes(4))
+			.saturating_add(T::DbWeight::get().writes((1u64).saturating_mul(s as u64)))
 	}
 	// Storage: LogicProvider MajorityType (r:0 w:1)
 	fn set_majority_type() -> Weight {
-		(1_000_000 as Weight).saturating_add(T::DbWeight::get().writes(1 as Weight))
+		Weight::from_ref_time(1_000_000).saturating_add(T::DbWeight::get().writes(1))
 	}
 	// Storage: LogicProvider RoundStates (r:1 w:1)
 	// Storage: LogicProvider CommitmentBlockNumbers (r:1 w:1)
 	// Storage: Commitments Commits (r:1 w:1)
 	// Storage: Balances Locks (r:5 w:5)
 	fn resolve_metadata_dispute(s: u32) -> Weight {
-		(0 as Weight)
+		Weight::from_ref_time(0)
 			// Standard Error: 22_000
-			.saturating_add((12_842_000 as Weight).saturating_mul(s as Weight))
-			.saturating_add(T::DbWeight::get().reads(3 as Weight))
-			.saturating_add(T::DbWeight::get().reads((1 as Weight).saturating_mul(s as Weight)))
-			.saturating_add(T::DbWeight::get().writes(3 as Weight))
-			.saturating_add(T::DbWeight::get().writes((1 as Weight).saturating_mul(s as Weight)))
+			.saturating_add(Weight::from_ref_time(12_842_000).saturating_mul(s as u64))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().reads((1u64).saturating_mul(s as u64)))
+			.saturating_add(T::DbWeight::get().writes(3))
+			.saturating_add(T::DbWeight::get().writes((1u64).saturating_mul(s as u64)))
 	}
 
 	fn on_finalize(metadatas: u32, max_participants: u32) -> Weight {
-		(metadatas as Weight)
+		Weight::from_ref_time(metadatas as u64)
 			.saturating_mul(
 				Self::issue_rewards_to_some_participants(max_participants)
-					.max(Self::issue_rewards_to_all_participants(max_participants)),
+					.max(Self::issue_rewards_to_all_participants(max_participants)).ref_time(),
 			)
 			.saturating_add(
 				T::DbWeight::get()
-					.writes(1 as Weight)
-					.saturating_add(T::DbWeight::get().reads(1 as Weight)),
+					.writes(1)
+					.saturating_add(T::DbWeight::get().reads(1)),
 			)
 	}
 }
@@ -144,16 +144,16 @@ impl WeightInfo for () {
 	// Storage: LogicProvider MajorityType (r:1 w:0)
 	// Storage: Balances Locks (r:1 w:1)
 	fn commit_processing_result_hash() -> Weight {
-		(33_000_000 as Weight)
-			.saturating_add(RocksDbWeight::get().reads(7 as Weight))
-			.saturating_add(RocksDbWeight::get().writes(3 as Weight))
+		Weight::from_ref_time(33_000_000)
+			.saturating_add(RocksDbWeight::get().reads(7))
+			.saturating_add(RocksDbWeight::get().writes(3))
 	}
 	// Storage: Commitments RevealWindow (r:1 w:0)
 	// Storage: Commitments Commits (r:1 w:1)
 	fn reveal_processing_result_hash() -> Weight {
-		(15_000_000 as Weight)
-			.saturating_add(RocksDbWeight::get().reads(2 as Weight))
-			.saturating_add(RocksDbWeight::get().writes(1 as Weight))
+		Weight::from_ref_time(15_000_000)
+			.saturating_add(RocksDbWeight::get().reads(2))
+			.saturating_add(RocksDbWeight::get().writes(1))
 	}
 	// Storage: LogicProvider CommitmentBlockNumbers (r:1 w:1)
 	// Storage: Commitments Commits (r:1 w:1)
@@ -162,13 +162,13 @@ impl WeightInfo for () {
 	// Storage: LogicProvider RoundStates (r:0 w:1)
 	// Storage: LogicProvider ProcessedHashes (r:0 w:1)
 	fn issue_rewards_to_some_participants(s: u32) -> Weight {
-		(0 as Weight)
+		Weight::from_ref_time(0)
 			// Standard Error: 28_000
-			.saturating_add((13_797_000 as Weight).saturating_mul(s as Weight))
-			.saturating_add(RocksDbWeight::get().reads(3 as Weight))
-			.saturating_add(RocksDbWeight::get().reads((1 as Weight).saturating_mul(s as Weight)))
-			.saturating_add(RocksDbWeight::get().writes(4 as Weight))
-			.saturating_add(RocksDbWeight::get().writes((1 as Weight).saturating_mul(s as Weight)))
+			.saturating_add(Weight::from_ref_time(13_797_000).saturating_mul(s as u64))
+			.saturating_add(RocksDbWeight::get().reads(3))
+			.saturating_add(RocksDbWeight::get().reads((1u64).saturating_mul(s as u64)))
+			.saturating_add(RocksDbWeight::get().writes(4))
+			.saturating_add(RocksDbWeight::get().writes((1u64).saturating_mul(s as u64)))
 	}
 	// Storage: LogicProvider CommitmentBlockNumbers (r:1 w:1)
 	// Storage: Commitments Commits (r:1 w:1)
@@ -177,35 +177,35 @@ impl WeightInfo for () {
 	// Storage: LogicProvider RoundStates (r:0 w:1)
 	// Storage: LogicProvider ProcessedHashes (r:0 w:1)
 	fn issue_rewards_to_all_participants(s: u32) -> Weight {
-		(0 as Weight)
+		Weight::from_ref_time(0)
 			// Standard Error: 30_000
-			.saturating_add((15_022_000 as Weight).saturating_mul(s as Weight))
-			.saturating_add(RocksDbWeight::get().reads(3 as Weight))
-			.saturating_add(RocksDbWeight::get().reads((1 as Weight).saturating_mul(s as Weight)))
-			.saturating_add(RocksDbWeight::get().writes(4 as Weight))
-			.saturating_add(RocksDbWeight::get().writes((1 as Weight).saturating_mul(s as Weight)))
+			.saturating_add(Weight::from_ref_time(15_022_000).saturating_mul(s as u64))
+			.saturating_add(RocksDbWeight::get().reads(3))
+			.saturating_add(RocksDbWeight::get().reads((1u64).saturating_mul(s as u64)))
+			.saturating_add(RocksDbWeight::get().writes(4))
+			.saturating_add(RocksDbWeight::get().writes((1u64).saturating_mul(s as u64)))
 	}
 	// Storage: LogicProvider MajorityType (r:0 w:1)
 	fn set_majority_type() -> Weight {
-		(1_000_000 as Weight).saturating_add(RocksDbWeight::get().writes(1 as Weight))
+		Weight::from_ref_time(1_000_000).saturating_add(RocksDbWeight::get().writes(1))
 	}
 	// Storage: LogicProvider RoundStates (r:1 w:1)
 	// Storage: LogicProvider CommitmentBlockNumbers (r:1 w:1)
 	// Storage: Commitments Commits (r:1 w:1)
 	// Storage: Balances Locks (r:5 w:5)
 	fn resolve_metadata_dispute(s: u32) -> Weight {
-		(0 as Weight)
+		Weight::from_ref_time(0)
 			// Standard Error: 22_000
-			.saturating_add((12_842_000 as Weight).saturating_mul(s as Weight))
-			.saturating_add(RocksDbWeight::get().reads(3 as Weight))
-			.saturating_add(RocksDbWeight::get().reads((1 as Weight).saturating_mul(s as Weight)))
-			.saturating_add(RocksDbWeight::get().writes(3 as Weight))
-			.saturating_add(RocksDbWeight::get().writes((1 as Weight).saturating_mul(s as Weight)))
+			.saturating_add(Weight::from_ref_time(12_842_000).saturating_mul(s as u64))
+			.saturating_add(RocksDbWeight::get().reads(3))
+			.saturating_add(RocksDbWeight::get().reads((1u64).saturating_mul(s as u64)))
+			.saturating_add(RocksDbWeight::get().writes(3))
+			.saturating_add(RocksDbWeight::get().writes((1u64).saturating_mul(s as u64)))
 	}
 	// Storage: LogicProvider StartingBlockForCurrentRound (r:1 w:1)
 	fn on_finalize(_metadatas: u32, _max_participants: u32) -> Weight {
 		RocksDbWeight::get()
-			.writes(1 as Weight)
-			.saturating_add(RocksDbWeight::get().reads(1 as Weight))
+			.writes(1)
+			.saturating_add(RocksDbWeight::get().reads(1))
 	}
 }

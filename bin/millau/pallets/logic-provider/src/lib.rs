@@ -58,7 +58,7 @@ pub mod pallet {
 	#[pallet::config]
 	pub trait Config: frame_system::Config + pallet_commitments::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		// Constants
 		#[pallet::constant]
 		type MaxCallPayloadLength: Get<u16>;
@@ -68,7 +68,7 @@ pub mod pallet {
 		type Reward: Get<BalanceOf<Self>>;
 		#[pallet::constant]
 		type FundsToLock: Get<BalanceOf<Self>>;
-		type ForceOrigin: EnsureOrigin<Self::Origin>;
+		type ForceOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 		type WeightInfo: WeightInfo;
 		// Outer types
 		type LocalCurrency: Currency<<Self as frame_system::Config>::AccountId>
