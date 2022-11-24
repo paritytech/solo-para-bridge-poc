@@ -32,7 +32,7 @@ use frame_support::{
 };
 use frame_system::limits;
 use scale_info::TypeInfo;
-use sp_core::{storage::StateVersion, Hasher as HasherT};
+use sp_core::storage::StateVersion;
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentifyAccount, Verify},
 	MultiSignature, MultiSigner, Perbill,

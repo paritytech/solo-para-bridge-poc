@@ -10,7 +10,6 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use crate::types::State;
 	use bin_traits::{SharedState, SharedStateError};
 	use frame_support::{inherent::Vec, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;

@@ -49,11 +49,11 @@ pub struct RunCmd {
 	pub base: sc_cli::RunCmd,
 
 	/// Run node as aggregator or logic provider.
-	#[clap(long, default_value_t = NodeProcessingRole::None)]
+	#[clap(long, value_enum, default_value_t = NodeProcessingRole::None)]
 	pub node_processing_role: NodeProcessingRole,
 
 	/// Set offchain config
-	#[clap(long)]
+	#[clap(long, value_enum)]
 	pub set_config: Option<String>,
 }
 
@@ -61,14 +61,6 @@ pub struct RunCmd {
 pub struct Cli {
 	#[structopt(subcommand)]
 	pub subcommand: Option<Subcommand>,
-
-	/// Run node as aggregator or logic provider.
-	#[clap(long, default_value_t = NodeProcessingRole::None)]
-	pub node_processing_role: NodeProcessingRole,
-
-	/// Set offchain config
-	#[clap(long)]
-	pub set_config: Option<String>,
 
 	#[structopt(flatten)]
 	pub run: RunCmd,

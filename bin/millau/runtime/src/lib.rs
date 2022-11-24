@@ -43,7 +43,6 @@ use pallet_grandpa::{
 	fg_primitives, AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList,
 };
 use pallet_transaction_payment::{FeeDetails, Multiplier, RuntimeDispatchInfo};
-use pallet_xcm::EnsureXcm;
 use primitives::shared::MapToCall;
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
@@ -56,16 +55,8 @@ use sp_runtime::{
 	ApplyExtrinsicResult, FixedPointNumber, Perquintill,
 };
 
-use bridge_runtime_common::{
-	messages::source::{XcmBridge, XcmBridgeAdapter},
-	CustomNetworkId,
-};
+use bridge_runtime_common::CustomNetworkId;
 use xcm::latest::prelude::*;
-use xcm_builder::{
-	AccountId32Aliases, AllowKnownQueryResponses, AllowTopLevelPaidExecutionFrom,
-	CurrencyAdapter as XcmCurrencyAdapter, IsConcrete, SignedAccountId32AsNative,
-	SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit, UsingComponents,
-};
 
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
@@ -81,7 +72,7 @@ pub use frame_support::{
 	parameter_types,
 	traits::{Currency, ExistenceRequirement, Imbalance, KeyOwnerProofSystem},
 	weights::{
-		constants::WEIGHT_PER_SECOND, ConstantMultiplier, IdentityFee, PostDispatchInfo, RuntimeDbWeight, Weight,
+		constants::WEIGHT_PER_SECOND, ConstantMultiplier, IdentityFee, RuntimeDbWeight, Weight,
 	},
 	RuntimeDebug, StorageValue,
 };

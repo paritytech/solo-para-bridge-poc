@@ -9,9 +9,7 @@ pub use pallet::*;
 pub mod pallet {
 	use super::*;
 	use bin_traits::{SharedState, SharedStateError, Vec};
-	use codec::{Decode, Encode};
 	use frame_support::pallet_prelude::*;
-	use frame_system::pallet_prelude::*;
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
