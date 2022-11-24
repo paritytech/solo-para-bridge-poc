@@ -33,4 +33,4 @@ primitives = { version = "0.2.0", path = "../primitives/primitives" }
 runtime-api = { version = "0.2.0", path = "../primitives/runtime-api" }
 
 [dev-dependencies]
-kvdb-memorydb = "0.11.0"
+kvdb-memorydb = "0.12.0"

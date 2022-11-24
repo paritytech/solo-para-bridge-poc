@@ -23,7 +23,7 @@ use crate::cli::{
 	CliChain,
 };
 use bp_runtime::BlockNumberOf;
-use relay_substrate_client::{AccountIdOf, AccountKeyPairOf, Chain, TransactionSignScheme};
+use relay_substrate_client::{AccountIdOf, AccountKeyPairOf, ChainWithTransactions};
 use sp_core::Pair;
 use substrate_relay_helper::{
 	finality::SubstrateFinalitySyncPipeline,
@@ -31,16 +31,20 @@ use substrate_relay_helper::{
 	TaggedAccount, TransactionParams,
 };
 
+/// A base relay between two standalone (relay) chains.
+///
+/// Such relay starts 2 messages relay and 2 on-demand header relays.
 pub struct RelayToRelayBridge<
 	L2R: MessagesCliBridge + RelayToRelayHeadersCliBridge,
 	R2L: MessagesCliBridge + RelayToRelayHeadersCliBridge,
 > {
+	/// Parameters that are shared by all bridge types.
 	pub common:
 		Full2WayBridgeCommonParams<<R2L as CliBridgeBase>::Target, <L2R as CliBridgeBase>::Target>,
-	// override for right->left headers signer
+	/// Override for right->left headers signer.
 	pub right_to_left_transaction_params:
 		TransactionParams<AccountKeyPairOf<<R2L as CliBridgeBase>::Target>>,
-	// override for left->right headers signer
+	/// Override for left->right headers signer.
 	pub left_to_right_transaction_params:
 		TransactionParams<AccountKeyPairOf<<L2R as CliBridgeBase>::Target>>,
 }
@@ -77,8 +81,8 @@ macro_rules! declare_relay_to_relay_bridge_schema {
 
 			impl [<$left_chain $right_chain HeadersAndMessages>] {
 				async fn into_bridge<
-					Left: TransactionSignScheme + CliChain<KeyPair = AccountKeyPairOf<Left>>,
-					Right: TransactionSignScheme + CliChain<KeyPair = AccountKeyPairOf<Right>>,
+					Left: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Left>>,
+					Right: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Right>>,
 					L2R: CliBridgeBase<Source = Left, Target = Right> + MessagesCliBridge + RelayToRelayHeadersCliBridge,
 					R2L: CliBridgeBase<Source = Right, Target = Left> + MessagesCliBridge + RelayToRelayHeadersCliBridge,
 				>(
@@ -117,8 +121,8 @@ macro_rules! declare_relay_to_relay_bridge_schema {
 
 #[async_trait]
 impl<
-		Left: Chain + TransactionSignScheme<Chain = Left> + CliChain<KeyPair = AccountKeyPairOf<Left>>,
-		Right: Chain + TransactionSignScheme<Chain = Right> + CliChain<KeyPair = AccountKeyPairOf<Right>>,
+		Left: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Left>>,
+		Right: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Right>>,
 		L2R: CliBridgeBase<Source = Left, Target = Right>
 			+ MessagesCliBridge
 			+ RelayToRelayHeadersCliBridge,

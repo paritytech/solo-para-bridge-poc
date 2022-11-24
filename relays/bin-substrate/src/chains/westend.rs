@@ -21,10 +21,9 @@ use relay_westend_client::{Westend, Westmint};
 use sp_version::RuntimeVersion;
 
 impl CliChain for Westend {
-	const RUNTIME_VERSION: RuntimeVersion = bp_westend::VERSION;
+	const RUNTIME_VERSION: Option<RuntimeVersion> = None;
 
 	type KeyPair = sp_core::sr25519::Pair;
-	type MessagePayload = Vec<u8>;
 
 	fn ss58_format() -> u16 {
 		sp_core::crypto::Ss58AddressFormat::from(
@@ -35,10 +34,9 @@ impl CliChain for Westend {
 }
 
 impl CliChain for Westmint {
-	const RUNTIME_VERSION: RuntimeVersion = bp_westend::VERSION;
+	const RUNTIME_VERSION: Option<RuntimeVersion> = None;
 
 	type KeyPair = sp_core::sr25519::Pair;
-	type MessagePayload = Vec<u8>;
 
 	fn ss58_format() -> u16 {
 		sp_core::crypto::Ss58AddressFormat::from(

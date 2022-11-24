@@ -51,16 +51,16 @@ parameter_types! {
 }
 
 impl frame_system::Config for TestRuntime {
-	type Origin = Origin;
+	type RuntimeOrigin = RuntimeOrigin;
 	type Index = u64;
-	type Call = Call;
+	type RuntimeCall = RuntimeCall;
 	type BlockNumber = u64;
 	type Hash = H256;
 	type Hashing = BlakeTwo256;
 	type AccountId = AccountId;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = SubstrateHeader;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = frame_support::traits::ConstU64<250>;
 	type Version = ();
 	type PalletInfo = PalletInfo;
@@ -81,7 +81,7 @@ impl pallet_balances::Config for TestRuntime {
 	type MaxLocks = ();
 	type Balance = Balance;
 	type DustRemoval = ();
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type ExistentialDeposit = frame_support::traits::ConstU64<1>;
 	type AccountStore = frame_system::Pallet<TestRuntime>;
 	type WeightInfo = ();
@@ -91,30 +91,26 @@ impl pallet_balances::Config for TestRuntime {
 
 parameter_types! {
 	pub const TestBridgedChainId: bp_runtime::ChainId = *b"test";
+	pub ActiveOutboundLanes: &'static [bp_messages::LaneId] = &[[0, 0, 0, 0]];
 }
 
 // we're not testing messages pallet here, so values in this config might be crazy
 impl pallet_bridge_messages::Config for TestRuntime {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
-	type Parameter = ();
-	type MaxMessagesToPruneAtOnce = frame_support::traits::ConstU64<0>;
+	type ActiveOutboundLanes = ActiveOutboundLanes;
 	type MaxUnrewardedRelayerEntriesAtInboundLane = frame_support::traits::ConstU64<8>;
 	type MaxUnconfirmedMessagesAtInboundLane = frame_support::traits::ConstU64<8>;
 
 	type MaximalOutboundPayloadSize = frame_support::traits::ConstU32<1024>;
 	type OutboundPayload = ();
-	type OutboundMessageFee = Balance;
 
 	type InboundPayload = ();
-	type InboundMessageFee = Balance;
 	type InboundRelayer = AccountId;
 
 	type TargetHeaderChain = ForbidOutboundMessages;
 	type LaneMessageVerifier = ForbidOutboundMessages;
 	type MessageDeliveryAndDispatchPayment = ();
-	type OnMessageAccepted = ();
-	type OnDeliveryConfirmed = ();
 
 	type SourceHeaderChain = ForbidInboundMessages;
 	type MessageDispatch = ForbidInboundMessages;
@@ -122,7 +118,7 @@ impl pallet_bridge_messages::Config for TestRuntime {
 }
 
 impl pallet_bridge_relayers::Config for TestRuntime {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type Reward = Balance;
 	type PaymentProcedure = TestPaymentProcedure;
 	type WeightInfo = ();

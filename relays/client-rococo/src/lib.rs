@@ -17,7 +17,7 @@
 //! Types used to connect to the Rococo-Substrate chain.
 
 use frame_support::weights::Weight;
-use relay_substrate_client::{Chain, ChainBase, ChainWithBalances, ChainWithGrandpa};
+use relay_substrate_client::{Chain, ChainBase, ChainWithBalances, ChainWithGrandpa, RelayChain};
 use sp_core::storage::StorageKey;
 use std::time::Duration;
 
@@ -57,11 +57,9 @@ impl Chain for Rococo {
 	const BEST_FINALIZED_HEADER_ID_METHOD: &'static str =
 		bp_rococo::BEST_FINALIZED_ROCOCO_HEADER_METHOD;
 	const AVERAGE_BLOCK_INTERVAL: Duration = Duration::from_secs(6);
-	const STORAGE_PROOF_OVERHEAD: u32 = bp_rococo::EXTRA_STORAGE_PROOF_SIZE;
 
 	type SignedBlock = bp_rococo::SignedBlock;
 	type Call = ();
-	type WeightToFee = bp_rococo::WeightToFee;
 }
 
 impl ChainWithGrandpa for Rococo {
@@ -72,4 +70,9 @@ impl ChainWithBalances for Rococo {
 	fn account_info_storage_key(account_id: &Self::AccountId) -> StorageKey {
 		StorageKey(bp_rococo::account_info_storage_key(account_id))
 	}
+}
+
+impl RelayChain for Rococo {
+	const PARAS_PALLET_NAME: &'static str = bp_rococo::PARAS_PALLET_NAME;
+	const PARACHAINS_FINALITY_PALLET_NAME: &'static str = "bridgeRococoParachain";
 }

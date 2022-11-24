@@ -19,7 +19,7 @@ use bp_runtime::{
 	Chain as ChainBase, EncodedOrDecodedCall, HashOf, TransactionEra, TransactionEraOf,
 };
 use codec::{Codec, Encode};
-use frame_support::weights::{Weight, WeightToFee};
+use frame_support::weights::WeightToFee;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use num_traits::Zero;
 use sc_transaction_pool_api::TransactionStatus;
@@ -27,7 +27,7 @@ use sp_core::{storage::StorageKey, Pair};
 use sp_runtime::{
 	generic::SignedBlock,
 	traits::{Block as BlockT, Dispatchable, Member},
-	EncodedJustification,
+	ConsensusEngineId, EncodedJustification,
 };
 use std::{fmt::Debug, time::Duration};
 
@@ -52,16 +52,11 @@ pub trait Chain: ChainBase + Clone {
 	/// How often blocks are produced on that chain. It's suggested to set this value
 	/// to match the block time of the chain.
 	const AVERAGE_BLOCK_INTERVAL: Duration;
-	/// Maximal expected storage proof overhead (in bytes).
-	const STORAGE_PROOF_OVERHEAD: u32;
 
 	/// Block type.
 	type SignedBlock: Member + Serialize + DeserializeOwned + BlockWithJustification<Self::Header>;
 	/// The aggregated `Call` type.
 	type Call: Clone + Codec + Dispatchable + Debug + Send;
-
-	/// Type that is used by the chain, to convert from weight to fee.
-	type WeightToFee: WeightToFee<Balance = Self::Balance>;
 }
 
 /// Substrate-based relay chain that supports parachains.
@@ -109,10 +104,6 @@ pub trait ChainWithMessages: Chain {
 	/// The method is provided by the runtime that is bridged with this `ChainWithMessages`.
 	const FROM_CHAIN_MESSAGE_DETAILS_METHOD: &'static str;
 
-	/// Additional weight of the dispatch fee payment if dispatch is paid at the target chain
-	/// and this `ChainWithMessages` is the target chain.
-	const PAY_INBOUND_DISPATCH_FEE_WEIGHT_AT_CHAIN: Weight;
-
 	/// Maximal number of unrewarded relayers in a single confirmation transaction at this
 	/// `ChainWithMessages`.
 	const MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX: MessageNonce;
@@ -120,6 +111,8 @@ pub trait ChainWithMessages: Chain {
 	/// `ChainWithMessages`.
 	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce;
 
+	/// Type that is used by the chain, to convert from weight to fee.
+	type WeightToFee: WeightToFee<Balance = Self::Balance>;
 	/// Weights of message pallet calls.
 	type WeightInfo: pallet_bridge_messages::WeightInfoExt;
 }
@@ -127,7 +120,7 @@ pub trait ChainWithMessages: Chain {
 /// Call type used by the chain.
 pub type CallOf<C> = <C as Chain>::Call;
 /// Weight-to-Fee type used by the chain.
-pub type WeightToFeeOf<C> = <C as Chain>::WeightToFee;
+pub type WeightToFeeOf<C> = <C as ChainWithMessages>::WeightToFee;
 /// Transaction status of the chain.
 pub type TransactionStatusOf<C> = TransactionStatus<HashOf<C>, HashOf<C>>;
 
@@ -148,7 +141,7 @@ pub trait BlockWithJustification<Header> {
 	/// Return encoded block extrinsics.
 	fn extrinsics(&self) -> Vec<EncodedExtrinsic>;
 	/// Return block justification, if known.
-	fn justification(&self) -> Option<&EncodedJustification>;
+	fn justification(&self, engine_id: ConsensusEngineId) -> Option<&EncodedJustification>;
 }
 
 /// Transaction before it is signed.
@@ -186,12 +179,10 @@ impl<C: Chain> UnsignedTransaction<C> {
 }
 
 /// Account key pair used by transactions signing scheme.
-pub type AccountKeyPairOf<S> = <S as TransactionSignScheme>::AccountKeyPair;
+pub type AccountKeyPairOf<S> = <S as ChainWithTransactions>::AccountKeyPair;
 
 /// Substrate-based chain transactions signing scheme.
-pub trait TransactionSignScheme: 'static {
-	/// Chain that this scheme is to be used.
-	type Chain: Chain;
+pub trait ChainWithTransactions: Chain {
 	/// Type of key pairs used to sign transactions.
 	type AccountKeyPair: Pair;
 	/// Signed transaction.
@@ -200,7 +191,7 @@ pub trait TransactionSignScheme: 'static {
 	/// Create transaction for given runtime call, signed by given account.
 	fn sign_transaction(
 		param: SignParam<Self>,
-		unsigned: UnsignedTransaction<Self::Chain>,
+		unsigned: UnsignedTransaction<Self>,
 	) -> Result<Self::SignedTransaction, crate::Error>
 	where
 		Self: Sized;
@@ -214,19 +205,19 @@ pub trait TransactionSignScheme: 'static {
 	/// Parse signed transaction into its unsigned part.
 	///
 	/// Returns `None` if signed transaction has unsupported format.
-	fn parse_transaction(tx: Self::SignedTransaction) -> Option<UnsignedTransaction<Self::Chain>>;
+	fn parse_transaction(tx: Self::SignedTransaction) -> Option<UnsignedTransaction<Self>>;
 }
 
 /// Sign transaction parameters
-pub struct SignParam<T: TransactionSignScheme> {
+pub struct SignParam<C: ChainWithTransactions> {
 	/// Version of the runtime specification.
 	pub spec_version: u32,
 	/// Transaction version
 	pub transaction_version: u32,
 	/// Hash of the genesis block.
-	pub genesis_hash: <T::Chain as ChainBase>::Hash,
+	pub genesis_hash: HashOf<C>,
 	/// Signer account
-	pub signer: T::AccountKeyPair,
+	pub signer: AccountKeyPairOf<C>,
 }
 
 impl<Block: BlockT> BlockWithJustification<Block::Header> for SignedBlock<Block> {
@@ -238,9 +229,7 @@ impl<Block: BlockT> BlockWithJustification<Block::Header> for SignedBlock<Block>
 		self.block.extrinsics().iter().map(Encode::encode).collect()
 	}
 
-	fn justification(&self) -> Option<&EncodedJustification> {
-		self.justifications
-			.as_ref()
-			.and_then(|j| j.get(sp_finality_grandpa::GRANDPA_ENGINE_ID))
+	fn justification(&self, engine_id: ConsensusEngineId) -> Option<&EncodedJustification> {
+		self.justifications.as_ref().and_then(|j| j.get(engine_id))
 	}
 }

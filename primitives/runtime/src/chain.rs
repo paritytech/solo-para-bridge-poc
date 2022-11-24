@@ -15,7 +15,7 @@
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::HeaderIdProvider;
-use codec::{Decode, Encode};
+use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::{weights::Weight, Parameter};
 use num_traits::{AsPrimitive, Bounded, CheckedSub, Saturating, SaturatingAdd, Zero};
 use sp_runtime::{
@@ -111,6 +111,7 @@ pub trait Chain: Send + Sync + 'static {
 		+ AsPrimitive<usize>
 		+ Default
 		+ Saturating
+		+ MaxEncodedLen
 		// original `sp_runtime::traits::Header::BlockNumber` doesn't have this trait, but
 		// `sp_runtime::generic::Era` requires block number -> `u64` conversion.
 		+ Into<u64>;
@@ -130,7 +131,8 @@ pub trait Chain: Send + Sync + 'static {
 		+ SimpleBitOps
 		+ AsRef<[u8]>
 		+ AsMut<[u8]>
-		+ MaybeMallocSizeOf;
+		+ MaybeMallocSizeOf
+		+ MaxEncodedLen;
 
 	/// A type that fulfills the abstract idea of what a Substrate hasher (a type
 	/// that produces hashes) is.
@@ -148,7 +150,13 @@ pub trait Chain: Send + Sync + 'static {
 		+ MaybeSerializeDeserialize;
 
 	/// The user account identifier type for the runtime.
-	type AccountId: Parameter + Member + MaybeSerializeDeserialize + Debug + MaybeDisplay + Ord;
+	type AccountId: Parameter
+		+ Member
+		+ MaybeSerializeDeserialize
+		+ Debug
+		+ MaybeDisplay
+		+ Ord
+		+ MaxEncodedLen;
 	/// Balance of an account in native tokens.
 	///
 	/// The chain may support multiple tokens, but this particular type is for token that is used
@@ -165,7 +173,8 @@ pub trait Chain: Send + Sync + 'static {
 		+ PartialOrd
 		+ SaturatingAdd
 		+ Zero
-		+ TryFrom<sp_core::U256>;
+		+ TryFrom<sp_core::U256>
+		+ MaxEncodedLen;
 	/// Index of a transaction used by the chain.
 	type Index: Parameter
 		+ Member
@@ -175,7 +184,8 @@ pub trait Chain: Send + Sync + 'static {
 		+ MaybeDisplay
 		+ MaybeSerializeDeserialize
 		+ AtLeast32Bit
-		+ Copy;
+		+ Copy
+		+ MaxEncodedLen;
 	/// Signature type, used on this chain.
 	type Signature: Parameter + Verify;
 
@@ -183,6 +193,12 @@ pub trait Chain: Send + Sync + 'static {
 	fn max_extrinsic_size() -> u32;
 	/// Get the maximum weight (compute time) that a Normal extrinsic at this chain can use.
 	fn max_extrinsic_weight() -> Weight;
+}
+
+/// Minimal parachain representation that may be used from no_std environment.
+pub trait Parachain: Chain {
+	/// Parachain identifier.
+	const PARACHAIN_ID: u32;
 }
 
 /// Block number used by the chain.
@@ -284,21 +300,7 @@ macro_rules! decl_bridge_messages_runtime_apis {
 					///
 					/// This API is implemented by runtimes that are receiving messages from this chain, not by this
 					/// chain's runtime itself.
-					pub trait [<To $chain:camel OutboundLaneApi>]<OutboundMessageFee: Parameter, OutboundPayload: Parameter> {
-						/// Estimate message delivery and dispatch fee that needs to be paid by the sender on
-						/// this chain.
-						///
-						/// Returns `None` if message is too expensive to be sent to this chain from the bridged chain.
-						///
-						/// Please keep in mind that this method returns the lowest message fee required for message
-						/// to be accepted to the lane. It may be a good idea to pay a bit over this price to account
-						/// for future exchange rate changes and guarantee that relayer would deliver your message
-						/// to the target chain.
-						fn estimate_message_delivery_and_dispatch_fee(
-							lane_id: LaneId,
-							payload: OutboundPayload,
-							[<$chain:lower _to_this_conversion_rate>]: Option<FixedU128>,
-						) -> Option<OutboundMessageFee>;
+					pub trait [<To $chain:camel OutboundLaneApi>] {
 						/// Returns dispatch weight, encoded payload size and delivery+dispatch fee of all
 						/// messages in given inclusive range.
 						///
@@ -308,7 +310,7 @@ macro_rules! decl_bridge_messages_runtime_apis {
 							lane: LaneId,
 							begin: MessageNonce,
 							end: MessageNonce,
-						) -> Vec<OutboundMessageDetails<OutboundMessageFee>>;
+						) -> Vec<OutboundMessageDetails>;
 					}
 
 					/// Inbound message lane API for messages sent by this chain.
@@ -318,11 +320,11 @@ macro_rules! decl_bridge_messages_runtime_apis {
 					///
 					/// Entries of the resulting vector are matching entries of the `messages` vector. Entries of the
 					/// `messages` vector may (and need to) be read using `To<ThisChain>OutboundLaneApi::message_details`.
-					pub trait [<From $chain:camel InboundLaneApi>]<InboundMessageFee: Parameter> {
+					pub trait [<From $chain:camel InboundLaneApi>] {
 						/// Return details of given inbound messages.
 						fn message_details(
 							lane: LaneId,
-							messages: Vec<(MessagePayload, OutboundMessageDetails<InboundMessageFee>)>,
+							messages: Vec<(MessagePayload, OutboundMessageDetails)>,
 						) -> Vec<InboundMessageDetails>;
 					}
 				}
@@ -330,7 +332,7 @@ macro_rules! decl_bridge_messages_runtime_apis {
 
 			pub use [<$chain _messages_api>]::*;
 		}
-	}
+	};
 }
 
 /// Convenience macro that declares bridge finality runtime apis, bridge messages runtime apis

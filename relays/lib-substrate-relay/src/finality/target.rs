@@ -28,7 +28,7 @@ use async_trait::async_trait;
 use finality_relay::TargetClient;
 use relay_substrate_client::{
 	AccountIdOf, AccountKeyPairOf, Chain, Client, Error, HeaderIdOf, HeaderOf, SignParam,
-	SyncHeader, TransactionEra, TransactionSignScheme, UnsignedTransaction,
+	SyncHeader, TransactionEra, TransactionTracker, UnsignedTransaction,
 };
 use relay_utils::relay_loop::Client as RelayClient;
 use sp_core::Pair;
@@ -36,14 +36,14 @@ use sp_core::Pair;
 /// Substrate client as Substrate finality target.
 pub struct SubstrateFinalityTarget<P: SubstrateFinalitySyncPipeline> {
 	client: Client<P::TargetChain>,
-	transaction_params: TransactionParams<AccountKeyPairOf<P::TransactionSignScheme>>,
+	transaction_params: TransactionParams<AccountKeyPairOf<P::TargetChain>>,
 }
 
 impl<P: SubstrateFinalitySyncPipeline> SubstrateFinalityTarget<P> {
 	/// Create new Substrate headers target.
 	pub fn new(
 		client: Client<P::TargetChain>,
-		transaction_params: TransactionParams<AccountKeyPairOf<P::TransactionSignScheme>>,
+		transaction_params: TransactionParams<AccountKeyPairOf<P::TargetChain>>,
 	) -> Self {
 		SubstrateFinalityTarget { client, transaction_params }
 	}
@@ -86,9 +86,10 @@ impl<P: SubstrateFinalitySyncPipeline> RelayClient for SubstrateFinalityTarget<P
 impl<P: SubstrateFinalitySyncPipeline> TargetClient<FinalitySyncPipelineAdapter<P>>
 	for SubstrateFinalityTarget<P>
 where
-	AccountIdOf<P::TargetChain>: From<<AccountKeyPairOf<P::TransactionSignScheme> as Pair>::Public>,
-	P::TransactionSignScheme: TransactionSignScheme<Chain = P::TargetChain>,
+	AccountIdOf<P::TargetChain>: From<<AccountKeyPairOf<P::TargetChain> as Pair>::Public>,
 {
+	type TransactionTracker = TransactionTracker<P::TargetChain, Client<P::TargetChain>>;
+
 	async fn best_finalized_source_block_id(&self) -> Result<HeaderIdOf<P::SourceChain>, Error> {
 		// we can't continue to relay finality if target node is out of sync, because
 		// it may have already received (some of) headers that we're going to relay
@@ -109,16 +110,16 @@ where
 		&self,
 		header: SyncHeader<HeaderOf<P::SourceChain>>,
 		proof: SubstrateFinalityProof<P>,
-	) -> Result<(), Error> {
+	) -> Result<Self::TransactionTracker, Error> {
 		let genesis_hash = *self.client.genesis_hash();
 		let transaction_params = self.transaction_params.clone();
 		let call =
 			P::SubmitFinalityProofCallBuilder::build_submit_finality_proof_call(header, proof);
 		let (spec_version, transaction_version) = self.client.simple_runtime_version().await?;
 		self.client
-			.submit_signed_extrinsic(
+			.submit_and_watch_signed_extrinsic(
 				self.transaction_params.signer.public().into(),
-				SignParam::<P::TransactionSignScheme> {
+				SignParam::<P::TargetChain> {
 					spec_version,
 					transaction_version,
 					genesis_hash,
@@ -130,6 +131,5 @@ where
 				},
 			)
 			.await
-			.map(drop)
 	}
 }

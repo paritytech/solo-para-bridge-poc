@@ -18,8 +18,8 @@
 
 use jsonrpsee::RpcModule;
 use millau_runtime::{self, opaque::Block, RuntimeApi};
-use sc_client_api::{Backend, BlockBackend, ExecutorProvider};
-use sc_consensus_aura::{ImportQueueParams, SlotProportion, StartAuraParams};
+use sc_client_api::{Backend, BlockBackend};
+use sc_consensus_aura::{CompatibilityMode, ImportQueueParams, SlotProportion, StartAuraParams};
 pub use sc_executor::NativeElseWasmExecutor;
 use sc_finality_grandpa::SharedVoterState;
 use sc_keystore::LocalKeystore;
@@ -144,7 +144,7 @@ pub fn new_partial(
 	let slot_duration = sc_consensus_aura::slot_duration(&*client)?;
 
 	let import_queue =
-		sc_consensus_aura::import_queue::<AuraPair, _, _, _, _, _, _>(ImportQueueParams {
+		sc_consensus_aura::import_queue::<AuraPair, _, _, _, _, _>(ImportQueueParams {
 			block_import: beefy_block_import,
 			justification_import: Some(Box::new(grandpa_block_import.clone())),
 			client: client.clone(),
@@ -157,15 +157,13 @@ pub fn new_partial(
 						slot_duration,
 					);
 
-				Ok((timestamp, slot))
+				Ok((slot, timestamp))
 			},
 			spawner: &task_manager.spawn_essential_handle(),
-			can_author_with: sp_consensus::CanAuthorWithNativeVersion::new(
-				client.executor().clone(),
-			),
 			registry: config.prometheus_registry(),
 			check_for_equivocation: Default::default(),
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
+			compatibility_mode: CompatibilityMode::None,
 		})?;
 
 	Ok(sc_service::PartialComponents {
@@ -215,6 +213,8 @@ pub fn new_full(
 		};
 	}
 
+	let genesis_hash = client.block_hash(0).ok().flatten().expect("Genesis block exists; qed");
+
 	// Note: GrandPa is pushed before the Polkadot-specific protocols. This doesn't change
 	// anything in terms of behaviour, but makes the logs more consistent with the other
 	// Substrate nodes.
@@ -227,14 +227,21 @@ pub fn new_full(
 		.extra_sets
 		.push(sc_finality_grandpa::grandpa_peers_set_config(grandpa_protocol_name.clone()));
 
-	let beefy_protocol_name = beefy_gadget::protocol_standard_name(
-		&client.block_hash(0).ok().flatten().expect("Genesis block exists; qed"),
-		&config.chain_spec,
-	);
+	let beefy_gossip_proto_name =
+		beefy_gadget::gossip_protocol_name(genesis_hash, config.chain_spec.fork_id());
+	// `beefy_on_demand_justifications_handler` is given to `beefy-gadget` task to be run,
+	// while `beefy_req_resp_cfg` is added to `config.network.request_response_protocols`.
+	let (beefy_on_demand_justifications_handler, beefy_req_resp_cfg) =
+		beefy_gadget::communication::request_response::BeefyJustifsRequestHandler::new(
+			genesis_hash,
+			config.chain_spec.fork_id(),
+			client.clone(),
+		);
 	config
 		.network
 		.extra_sets
-		.push(beefy_gadget::beefy_peers_set_config(beefy_protocol_name.clone()));
+		.push(beefy_gadget::communication::beefy_peers_set_config(beefy_gossip_proto_name.clone()));
+	config.network.request_response_protocols.push(beefy_req_resp_cfg);
 
 	let warp_sync = Arc::new(sc_finality_grandpa::warp_proof::NetworkProvider::new(
 		backend.clone(),
@@ -242,7 +249,7 @@ pub fn new_full(
 		Vec::default(),
 	));
 
-	let (network, system_rpc_tx, network_starter) =
+	let (network, system_rpc_tx, tx_handler_controller, network_starter) =
 		sc_service::build_network(sc_service::BuildNetworkParams {
 			config: &config,
 			client: client.clone(),
@@ -295,7 +302,7 @@ pub fn new_full(
 
 		Box::new(move |_, subscription_executor: sc_rpc::SubscriptionTaskExecutor| {
 			let mut io = RpcModule::new(());
-			let map_err = |e| sc_service::Error::Other(format!("{}", e));
+			let map_err = |e| sc_service::Error::Other(format!("{e}"));
 			io.merge(System::new(client.clone(), pool.clone(), DenyUnsafe::No).into_rpc())
 				.map_err(map_err)?;
 			io.merge(TransactionPayment::new(client.clone()).into_rpc()).map_err(map_err)?;
@@ -316,7 +323,7 @@ pub fn new_full(
 					beefy_rpc_links.from_voter_best_beefy_stream.clone(),
 					subscription_executor,
 				)
-				.map_err(|e| sc_service::Error::Other(format!("{}", e)))?
+				.map_err(|e| sc_service::Error::Other(format!("{e}")))?
 				.into_rpc(),
 			)
 			.map_err(map_err)?;
@@ -335,6 +342,7 @@ pub fn new_full(
 		backend: backend.clone(),
 		system_rpc_tx,
 		config,
+		tx_handler_controller,
 		telemetry: telemetry.as_mut(),
 	})?;
 
@@ -347,12 +355,9 @@ pub fn new_full(
 			telemetry.as_ref().map(|x| x.handle()),
 		);
 
-		let can_author_with =
-			sp_consensus::CanAuthorWithNativeVersion::new(client.executor().clone());
-
 		let slot_duration = sc_consensus_aura::slot_duration(&*client)?;
 
-		let aura = sc_consensus_aura::start_aura::<AuraPair, _, _, _, _, _, _, _, _, _, _, _>(
+		let aura = sc_consensus_aura::start_aura::<AuraPair, _, _, _, _, _, _, _, _, _, _>(
 			StartAuraParams {
 				slot_duration,
 				client: client.clone(),
@@ -368,17 +373,17 @@ pub fn new_full(
 							slot_duration,
 						);
 
-					Ok((timestamp, slot))
+					Ok((slot, timestamp))
 				},
 				force_authoring,
 				backoff_authoring_blocks,
 				keystore: keystore_container.sync_keystore(),
-				can_author_with,
 				sync_oracle: network.clone(),
 				justification_sync_link: network.clone(),
 				block_proposal_slot_portion: SlotProportion::new(2f32 / 3f32),
 				max_block_proposal_slot_portion: None,
 				telemetry: telemetry.as_ref().map(|x| x.handle()),
+				compatibility_mode: CompatibilityMode::None,
 			},
 		)?;
 
@@ -394,23 +399,31 @@ pub fn new_full(
 	let keystore =
 		if role.is_authority() { Some(keystore_container.sync_keystore()) } else { None };
 
+	let justifications_protocol_name = beefy_on_demand_justifications_handler.protocol_name();
+	let payload_provider = beefy_primitives::mmr::MmrRootProvider::new(client.clone());
 	let beefy_params = beefy_gadget::BeefyParams {
 		client: client.clone(),
 		backend: backend.clone(),
+		payload_provider,
 		runtime: client.clone(),
 		key_store: keystore.clone(),
-		network: network.clone(),
+		network_params: beefy_gadget::BeefyNetworkParams {
+			network: network.clone(),
+			gossip_protocol_name: beefy_gossip_proto_name,
+			justifications_protocol_name,
+			_phantom: core::marker::PhantomData::<Block>,
+		},
 		min_block_delta: 2,
 		prometheus_registry: prometheus_registry.clone(),
-		protocol_name: beefy_protocol_name,
 		links: beefy_voter_links,
+		on_demand_justifications_handler: beefy_on_demand_justifications_handler,
 	};
 
 	// Start the BEEFY bridge gadget.
 	task_manager.spawn_essential_handle().spawn_blocking(
 		"beefy-gadget",
 		None,
-		beefy_gadget::start_beefy_gadget::<_, _, _, _, _>(beefy_params),
+		beefy_gadget::start_beefy_gadget::<_, _, _, _, _, _>(beefy_params),
 	);
 
 	let grandpa_config = sc_finality_grandpa::Config {

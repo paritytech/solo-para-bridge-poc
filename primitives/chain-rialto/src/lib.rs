@@ -23,14 +23,15 @@ use bp_messages::{
 };
 use bp_runtime::{decl_bridge_runtime_apis, Chain};
 use frame_support::{
-	weights::{constants::WEIGHT_PER_SECOND, DispatchClass, IdentityFee, Weight},
-	Parameter, RuntimeDebug,
+	dispatch::DispatchClass,
+	weights::{constants::WEIGHT_PER_SECOND, IdentityFee, Weight},
+	RuntimeDebug,
 };
 use frame_system::limits;
 use sp_core::Hasher as HasherT;
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentifyAccount, Verify},
-	FixedU128, MultiSignature, MultiSigner, Perbill,
+	MultiSignature, MultiSigner, Perbill,
 };
 use sp_std::prelude::*;
 
@@ -47,11 +48,8 @@ pub const TX_EXTRA_BYTES: u32 = 104;
 /// Maximal weight of single Rialto block.
 ///
 /// This represents two seconds of compute assuming a target block time of six seconds.
-pub const MAXIMUM_BLOCK_WEIGHT: Weight = 2 * WEIGHT_PER_SECOND;
-
-/// Represents the average portion of a block's weight that will be used by an
-/// `on_initialize()` runtime call.
-pub const AVERAGE_ON_INITIALIZE_RATIO: Perbill = Perbill::from_percent(10);
+// TODO: https://github.com/paritytech/parity-bridges-common/issues/1543 - remove `set_proof_size`
+pub const MAXIMUM_BLOCK_WEIGHT: Weight = WEIGHT_PER_SECOND.set_proof_size(1_000).saturating_mul(2);
 
 /// Represents the portion of a block that will be used by Normal extrinsics.
 pub const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -62,43 +60,21 @@ pub const MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX: MessageNonce = 1024;
 /// Maximal number of unconfirmed messages in Rialto confirmation transaction.
 pub const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce = 1024;
 
-/// Weight of single regular message delivery transaction on Rialto chain.
-///
-/// This value is a result of `pallet_bridge_messages::Pallet::receive_messages_proof_weight()` call
-/// for the case when single message of `pallet_bridge_messages::EXPECTED_DEFAULT_MESSAGE_LENGTH`
-/// bytes is delivered. The message must have dispatch weight set to zero. The result then must be
-/// rounded up to account possible future runtime upgrades.
-pub const DEFAULT_MESSAGE_DELIVERY_TX_WEIGHT: Weight = 1_500_000_000;
-
-/// Increase of delivery transaction weight on Rialto chain with every additional message byte.
-///
-/// This value is a result of
-/// `pallet_bridge_messages::WeightInfoExt::storage_proof_size_overhead(1)` call. The result then
-/// must be rounded up to account possible future runtime upgrades.
-pub const ADDITIONAL_MESSAGE_BYTE_DELIVERY_WEIGHT: Weight = 25_000;
-
-/// Maximal weight of single message delivery confirmation transaction on Rialto chain.
-///
-/// This value is a result of `pallet_bridge_messages::Pallet::receive_messages_delivery_proof`
-/// weight formula computation for the case when single message is confirmed. The result then must
-/// be rounded up to account possible future runtime upgrades.
-pub const MAX_SINGLE_MESSAGE_DELIVERY_CONFIRMATION_TX_WEIGHT: Weight = 2_000_000_000;
-
-/// Weight of pay-dispatch-fee operation for inbound messages at Rialto chain.
-///
-/// This value corresponds to the result of
-/// `pallet_bridge_messages::WeightInfoExt::pay_inbound_dispatch_fee_overhead()` call for your
-/// chain. Don't put too much reserve there, because it is used to **decrease**
-/// `DEFAULT_MESSAGE_DELIVERY_TX_WEIGHT` cost. So putting large reserve would make delivery
-/// transactions cheaper.
-pub const PAY_INBOUND_DISPATCH_FEE_WEIGHT: Weight = 700_000_000;
-
 /// The target length of a session (how often authorities change) on Rialto measured in of number of
 /// blocks.
 ///
 /// Note that since this is a target sessions may change before/after this time depending on network
 /// conditions.
 pub const SESSION_LENGTH: BlockNumber = 4;
+
+/// Maximal number of GRANDPA authorities at Rialto.
+pub const MAX_AUTHORITIES_COUNT: u32 = 5;
+
+/// Maximal SCALE-encoded header size (in bytes) at Rialto.
+pub const MAX_HEADER_SIZE: u32 = 1024;
+
+/// Maximal SCALE-encoded size of parachains headers that are stored at Rialto `Paras` pallet.
+pub const MAX_NESTED_PARACHAIN_HEAD_SIZE: u32 = MAX_HEADER_SIZE;
 
 /// Re-export `time_units` to make usage easier.
 pub use time_units::*;
@@ -184,21 +160,8 @@ impl Chain for Rialto {
 frame_support::parameter_types! {
 	pub BlockLength: limits::BlockLength =
 		limits::BlockLength::max_with_normal_ratio(5 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
-	pub BlockWeights: limits::BlockWeights = limits::BlockWeights::builder()
-		// Allowance for Normal class
-		.for_class(DispatchClass::Normal, |weights| {
-			weights.max_total = Some(NORMAL_DISPATCH_RATIO * MAXIMUM_BLOCK_WEIGHT);
-		})
-		// Allowance for Operational class
-		.for_class(DispatchClass::Operational, |weights| {
-			weights.max_total = Some(MAXIMUM_BLOCK_WEIGHT);
-			// Extra reserved space for Operational class
-			weights.reserved = Some(MAXIMUM_BLOCK_WEIGHT - NORMAL_DISPATCH_RATIO * MAXIMUM_BLOCK_WEIGHT);
-		})
-		// By default Mandatory class is not limited at all.
-		// This parameter is used to derive maximal size of a single extrinsic.
-		.avg_block_initialization(AVERAGE_ON_INITIALIZE_RATIO)
-		.build_or_panic();
+	pub BlockWeights: limits::BlockWeights =
+		limits::BlockWeights::with_sensible_defaults(MAXIMUM_BLOCK_WEIGHT, NORMAL_DISPATCH_RATIO);
 }
 
 /// Name of the With-Rialto GRANDPA pallet instance that is deployed at bridged chains.
@@ -207,9 +170,6 @@ pub const WITH_RIALTO_GRANDPA_PALLET_NAME: &str = "BridgeRialtoGrandpa";
 pub const WITH_RIALTO_MESSAGES_PALLET_NAME: &str = "BridgeRialtoMessages";
 /// Name of the With-Rialto parachains bridge pallet instance that is deployed at bridged chains.
 pub const WITH_RIALTO_BRIDGE_PARAS_PALLET_NAME: &str = "BridgeRialtoParachains";
-
-/// Name of the Millau->Rialto (actually KSM->DOT) conversion rate stored in the Rialto runtime.
-pub const MILLAU_TO_RIALTO_CONVERSION_RATE_PARAMETER_NAME: &str = "MillauToRialtoConversionRate";
 
 /// Name of the parachain registrar pallet in the Rialto runtime.
 pub const PARAS_REGISTRAR_PALLET_NAME: &str = "Registrar";

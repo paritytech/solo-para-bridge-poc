@@ -32,20 +32,11 @@ pub mod rialto_messages;
 pub mod rialto_parachain_messages;
 pub mod xcm_config;
 
-use crate::{
-	rialto_messages::{ToRialtoMessagePayload, WithRialtoMessageBridge},
-	rialto_parachain_messages::{
-		ToRialtoParachainMessagePayload, WithRialtoParachainMessageBridge,
-	},
-	xcm_config::XcmRouter,
-};
+use crate::xcm_config::XcmRouter;
 
 use beefy_primitives::{crypto::AuthorityId as BeefyId, mmr::MmrLeafVersion, ValidatorSet};
 use bp_rialto_parachain::RIALTO_PARACHAIN_ID;
 use bp_runtime::{HeaderId, HeaderIdProvider};
-use bridge_runtime_common::messages::{
-	source::estimate_message_dispatch_and_delivery_fee, MessageBridge,
-};
 use codec::Decode;
 use frame_system::{pallet_prelude::OriginFor, EnsureRoot};
 use pallet_grandpa::{
@@ -62,7 +53,7 @@ use sp_runtime::{
 	create_runtime_str, generic, impl_opaque_keys,
 	traits::{Block as BlockT, IdentityLookup, Keccak256, NumberFor, OpaqueKeys},
 	transaction_validity::{TransactionSource, TransactionValidity},
-	ApplyExtrinsicResult, FixedPointNumber, FixedU128, Perquintill,
+	ApplyExtrinsicResult, FixedPointNumber, Perquintill,
 };
 
 use bridge_runtime_common::{
@@ -86,12 +77,11 @@ pub use bridge_runtime_common;
 // A few exports that help ease life for downstream crates.
 pub use frame_support::{
 	construct_runtime,
-	dispatch::{DispatchErrorWithPostInfo, DispatchResultWithPostInfo},
+	dispatch::{DispatchClass, DispatchErrorWithPostInfo, DispatchResultWithPostInfo},
 	parameter_types,
 	traits::{Currency, ExistenceRequirement, Imbalance, KeyOwnerProofSystem},
 	weights::{
-		constants::WEIGHT_PER_SECOND, ConstantMultiplier, DispatchClass, IdentityFee,
-		PostDispatchInfo, RuntimeDbWeight, Weight,
+		constants::WEIGHT_PER_SECOND, ConstantMultiplier, IdentityFee, PostDispatchInfo, RuntimeDbWeight, Weight,
 	},
 	RuntimeDebug, StorageValue,
 };
@@ -206,7 +196,7 @@ impl frame_system::Config for Runtime {
 	/// The identifier used to distinguish between accounts.
 	type AccountId = AccountId;
 	/// The aggregated dispatch type that is available for extrinsics.
-	type Call = Call;
+	type RuntimeCall = RuntimeCall;
 	/// The lookup mechanism to get account ID from whatever is passed in dispatchers.
 	type Lookup = IdentityLookup<AccountId>;
 	/// The index type for storing how many extrinsics an account has signed.
@@ -221,9 +211,9 @@ impl frame_system::Config for Runtime {
 	/// The header type.
 	type Header = generic::Header<BlockNumber, Hashing>;
 	/// The ubiquitous event type.
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	/// The ubiquitous origin type.
-	type Origin = Origin;
+	type RuntimeOrigin = RuntimeOrigin;
 	/// Maximum number of block number to block hash mappings to keep (oldest pruned first).
 	type BlockHashCount = BlockHashCount;
 	/// Version of the runtime.
@@ -271,8 +261,7 @@ impl pallet_beefy::Config for Runtime {
 }
 
 impl pallet_grandpa::Config for Runtime {
-	type Event = Event;
-	type Call = Call;
+	type RuntimeEvent = RuntimeEvent;
 	type KeyOwnerProofSystem = ();
 	type KeyOwnerProof =
 		<Self::KeyOwnerProofSystem as KeyOwnerProofSystem<(KeyTypeId, GrandpaId)>>::Proof;
@@ -361,7 +350,7 @@ impl pallet_balances::Config for Runtime {
 	/// The type for recording an account's balance.
 	type Balance = Balance;
 	/// The ubiquitous event type.
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type DustRemoval = ();
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
@@ -381,6 +370,7 @@ parameter_types! {
 	pub const TargetBlockFullness: Perquintill = Perquintill::from_percent(25);
 	pub AdjustmentVariable: Multiplier = Multiplier::saturating_from_rational(3, 100_000);
 	pub MinimumMultiplier: Multiplier = Multiplier::saturating_from_rational(1, 1_000_000u128);
+	pub MaximumMultiplier: Multiplier = sp_runtime::traits::Bounded::max_value();
 }
 
 impl pallet_transaction_payment::Config for Runtime {
@@ -393,13 +383,14 @@ impl pallet_transaction_payment::Config for Runtime {
 		TargetBlockFullness,
 		AdjustmentVariable,
 		MinimumMultiplier,
+		MaximumMultiplier,
 	>;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 }
 
 impl pallet_sudo::Config for Runtime {
-	type Event = Event;
-	type Call = Call;
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
 }
 
 parameter_types! {
@@ -409,7 +400,7 @@ parameter_types! {
 }
 
 impl pallet_session::Config for Runtime {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type ValidatorId = <Self as frame_system::Config>::AccountId;
 	type ValidatorIdOf = ();
 	type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
@@ -430,7 +421,7 @@ parameter_types! {
 }
 
 impl pallet_bridge_relayers::Config for Runtime {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type Reward = Balance;
 	type PaymentProcedure = bp_relayers::MintReward<pallet_balances::Pallet<Runtime>, AccountId>;
 	type WeightInfo = ();
@@ -445,6 +436,12 @@ parameter_types! {
 	///
 	/// Note: This is lower than regular value, to speed up benchmarking setup.
 	pub const HeadersToKeep: u32 = 1024;
+	/// Maximal number of authorities at Rialto.
+	///
+	/// In benchmarks we're using sets of up to `1024` authorities to prepare for possible
+	/// upgrades in the future and see if performance degrades when number of authorities
+	/// grow.
+	pub const MaxAuthoritiesAtRialto: u32 = pallet_bridge_grandpa::benchmarking::MAX_VALIDATOR_SET_SIZE;
 }
 
 #[cfg(not(feature = "runtime-benchmarks"))]
@@ -453,7 +450,19 @@ parameter_types! {
 	///
 	/// Assuming the worst case of every header being finalized, we will keep headers at least for a
 	/// week.
-	pub const HeadersToKeep: u32 = 7 * bp_rialto::DAYS as u32;
+	pub const HeadersToKeep: u32 = 7 * bp_rialto::DAYS;
+	/// Maximal number of authorities at Rialto.
+	pub const MaxAuthoritiesAtRialto: u32 = bp_rialto::MAX_AUTHORITIES_COUNT;
+}
+
+parameter_types! {
+	/// Maximal size of SCALE-encoded Rialto header.
+	pub const MaxRialtoHeaderSize: u32 = bp_rialto::MAX_HEADER_SIZE;
+
+	/// Maximal number of authorities at Westend.
+	pub const MaxAuthoritiesAtWestend: u32 = bp_westend::MAX_AUTHORITIES_COUNT;
+	/// Maximal size of SCALE-encoded Westend header.
+	pub const MaxWestendHeaderSize: u32 = bp_westend::MAX_HEADER_SIZE;
 }
 
 pub type RialtoGrandpaInstance = ();
@@ -461,8 +470,21 @@ impl pallet_bridge_grandpa::Config for Runtime {
 	type BridgedChain = bp_rialto::Rialto;
 	type MaxRequests = MaxRequests;
 	type HeadersToKeep = HeadersToKeep;
+	type MaxBridgedAuthorities = MaxAuthoritiesAtRialto;
+	type MaxBridgedHeaderSize = MaxRialtoHeaderSize;
 
-	type WeightInfo = pallet_bridge_grandpa::weights::MillauWeight<Runtime>;
+	type WeightInfo = pallet_bridge_grandpa::weights::BridgeWeight<Runtime>;
+}
+
+pub type WestendGrandpaInstance = pallet_bridge_grandpa::Instance1;
+impl pallet_bridge_grandpa::Config<WestendGrandpaInstance> for Runtime {
+	type BridgedChain = bp_westend::Westend;
+	type MaxRequests = MaxRequests;
+	type HeadersToKeep = HeadersToKeep;
+	type MaxBridgedAuthorities = MaxAuthoritiesAtWestend;
+	type MaxBridgedHeaderSize = MaxWestendHeaderSize;
+
+	type WeightInfo = pallet_bridge_grandpa::weights::BridgeWeight<Runtime>;
 }
 
 impl pallet_shift_session_manager::Config for Runtime {}
@@ -473,31 +495,27 @@ parameter_types! {
 		bp_rialto::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
 	pub const MaxUnconfirmedMessagesAtInboundLane: bp_messages::MessageNonce =
 		bp_rialto::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
-	// `IdentityFee` is used by Millau => we may use weight directly
-	pub const GetDeliveryConfirmationTransactionFee: Balance =
-		bp_millau::MAX_SINGLE_MESSAGE_DELIVERY_CONFIRMATION_TX_WEIGHT as _;
 	pub const RootAccountForPayments: Option<AccountId> = None;
 	pub const RialtoChainId: bp_runtime::ChainId = bp_runtime::RIALTO_CHAIN_ID;
 	pub const RialtoParachainChainId: bp_runtime::ChainId = bp_runtime::RIALTO_PARACHAIN_CHAIN_ID;
+	pub RialtoActiveOutboundLanes: &'static [bp_messages::LaneId] = &[rialto_messages::XCM_LANE];
+	pub RialtoParachainActiveOutboundLanes: &'static [bp_messages::LaneId] = &[rialto_parachain_messages::XCM_LANE];
 }
 
 /// Instance of the messages pallet used to relay messages to/from Rialto chain.
 pub type WithRialtoMessagesInstance = ();
 
 impl pallet_bridge_messages::Config<WithRialtoMessagesInstance> for Runtime {
-	type Event = Event;
-	type WeightInfo = pallet_bridge_messages::weights::MillauWeight<Runtime>;
-	type Parameter = rialto_messages::MillauToRialtoMessagesParameter;
-	type MaxMessagesToPruneAtOnce = MaxMessagesToPruneAtOnce;
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = pallet_bridge_messages::weights::BridgeWeight<Runtime>;
+	type ActiveOutboundLanes = RialtoActiveOutboundLanes;
 	type MaxUnrewardedRelayerEntriesAtInboundLane = MaxUnrewardedRelayerEntriesAtInboundLane;
 	type MaxUnconfirmedMessagesAtInboundLane = MaxUnconfirmedMessagesAtInboundLane;
 
 	type MaximalOutboundPayloadSize = crate::rialto_messages::ToRialtoMaximalOutboundPayloadSize;
 	type OutboundPayload = crate::rialto_messages::ToRialtoMessagePayload;
-	type OutboundMessageFee = Balance;
 
 	type InboundPayload = crate::rialto_messages::FromRialtoMessagePayload;
-	type InboundMessageFee = bp_rialto::Balance;
 	type InboundRelayer = bp_rialto::AccountId;
 
 	type TargetHeaderChain = crate::rialto_messages::Rialto;
@@ -506,10 +524,7 @@ impl pallet_bridge_messages::Config<WithRialtoMessagesInstance> for Runtime {
 		pallet_bridge_relayers::MessageDeliveryAndDispatchPaymentAdapter<
 			Runtime,
 			WithRialtoMessagesInstance,
-			GetDeliveryConfirmationTransactionFee,
 		>;
-	type OnMessageAccepted = ();
-	type OnDeliveryConfirmed = ();
 
 	type SourceHeaderChain = crate::rialto_messages::Rialto;
 	type MessageDispatch = crate::rialto_messages::FromRialtoMessageDispatch;
@@ -520,20 +535,17 @@ impl pallet_bridge_messages::Config<WithRialtoMessagesInstance> for Runtime {
 pub type WithRialtoParachainMessagesInstance = pallet_bridge_messages::Instance1;
 
 impl pallet_bridge_messages::Config<WithRialtoParachainMessagesInstance> for Runtime {
-	type Event = Event;
-	type WeightInfo = pallet_bridge_messages::weights::MillauWeight<Runtime>;
-	type Parameter = rialto_parachain_messages::MillauToRialtoParachainMessagesParameter;
-	type MaxMessagesToPruneAtOnce = MaxMessagesToPruneAtOnce;
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = pallet_bridge_messages::weights::BridgeWeight<Runtime>;
+	type ActiveOutboundLanes = RialtoParachainActiveOutboundLanes;
 	type MaxUnrewardedRelayerEntriesAtInboundLane = MaxUnrewardedRelayerEntriesAtInboundLane;
 	type MaxUnconfirmedMessagesAtInboundLane = MaxUnconfirmedMessagesAtInboundLane;
 
 	type MaximalOutboundPayloadSize =
 		crate::rialto_parachain_messages::ToRialtoParachainMaximalOutboundPayloadSize;
 	type OutboundPayload = crate::rialto_parachain_messages::ToRialtoParachainMessagePayload;
-	type OutboundMessageFee = Balance;
 
 	type InboundPayload = crate::rialto_parachain_messages::FromRialtoParachainMessagePayload;
-	type InboundMessageFee = bp_rialto_parachain::Balance;
 	type InboundRelayer = bp_rialto_parachain::AccountId;
 
 	type TargetHeaderChain = crate::rialto_parachain_messages::RialtoParachain;
@@ -542,10 +554,7 @@ impl pallet_bridge_messages::Config<WithRialtoParachainMessagesInstance> for Run
 		pallet_bridge_relayers::MessageDeliveryAndDispatchPaymentAdapter<
 			Runtime,
 			WithRialtoParachainMessagesInstance,
-			GetDeliveryConfirmationTransactionFee,
 		>;
-	type OnMessageAccepted = ();
-	type OnDeliveryConfirmed = ();
 
 	type SourceHeaderChain = crate::rialto_parachain_messages::RialtoParachain;
 	type MessageDispatch = crate::rialto_parachain_messages::FromRialtoParachainMessageDispatch;
@@ -555,30 +564,34 @@ impl pallet_bridge_messages::Config<WithRialtoParachainMessagesInstance> for Run
 parameter_types! {
 	pub const RialtoParasPalletName: &'static str = bp_rialto::PARAS_PALLET_NAME;
 	pub const WestendParasPalletName: &'static str = bp_westend::PARAS_PALLET_NAME;
+	pub const MaxRialtoParaHeadSize: u32 = bp_rialto::MAX_NESTED_PARACHAIN_HEAD_SIZE;
+	pub const MaxWestendParaHeadSize: u32 = bp_westend::MAX_NESTED_PARACHAIN_HEAD_SIZE;
 }
 
 /// Instance of the with-Rialto parachains pallet.
 pub type WithRialtoParachainsInstance = ();
 
 impl pallet_bridge_parachains::Config<WithRialtoParachainsInstance> for Runtime {
-	type Event = Event;
-	type WeightInfo = pallet_bridge_parachains::weights::MillauWeight<Runtime>;
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = pallet_bridge_parachains::weights::BridgeWeight<Runtime>;
 	type BridgesGrandpaPalletInstance = RialtoGrandpaInstance;
 	type ParasPalletName = RialtoParasPalletName;
 	type TrackedParachains = frame_support::traits::Everything;
 	type HeadsToKeep = HeadersToKeep;
+	type MaxParaHeadSize = MaxRialtoParaHeadSize;
 }
 
 /// Instance of the with-Westend parachains pallet.
 pub type WithWestendParachainsInstance = pallet_bridge_parachains::Instance1;
 
 impl pallet_bridge_parachains::Config<WithWestendParachainsInstance> for Runtime {
-	type Event = Event;
-	type WeightInfo = pallet_bridge_parachains::weights::MillauWeight<Runtime>;
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = pallet_bridge_parachains::weights::BridgeWeight<Runtime>;
 	type BridgesGrandpaPalletInstance = WestendGrandpaInstance;
 	type ParasPalletName = WestendParasPalletName;
 	type TrackedParachains = frame_support::traits::Everything;
 	type HeadsToKeep = HeadersToKeep;
+	type MaxParaHeadSize = MaxWestendParaHeadSize;
 }
 
 // Logic Provider parameter types.
@@ -745,7 +758,7 @@ construct_runtime!(
 );
 
 generate_bridge_reject_obsolete_headers_and_messages! {
-	Call, AccountId,
+	RuntimeCall, AccountId,
 	// Grandpa
 	BridgeRialtoGrandpa, BridgeWestendGrandpa,
 	// Parachains
@@ -777,11 +790,12 @@ pub type SignedExtra = (
 	BridgeRejectObsoleteHeadersAndMessages,
 );
 /// The payload being signed in transactions.
-pub type SignedPayload = generic::SignedPayload<Call, SignedExtra>;
+pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 /// Unchecked extrinsic type as expected by this runtime.
-pub type UncheckedExtrinsic = generic::UncheckedExtrinsic<Address, Call, Signature, SignedExtra>;
+pub type UncheckedExtrinsic =
+	generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, SignedExtra>;
 /// Extrinsic type that has already been checked.
-pub type CheckedExtrinsic = generic::CheckedExtrinsic<AccountId, Call, SignedExtra>;
+pub type CheckedExtrinsic = generic::CheckedExtrinsic<AccountId, RuntimeCall, SignedExtra>;
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -917,11 +931,11 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl sp_mmr_primitives::MmrApi<Block, mmr::Hash> for Runtime {
-		fn generate_proof(leaf_index: u64)
+	impl sp_mmr_primitives::MmrApi<Block, mmr::Hash, BlockNumber> for Runtime {
+		fn generate_proof(block_number: BlockNumber)
 			-> Result<(EncodableOpaqueLeaf, MmrProof<mmr::Hash>), MmrError>
 		{
-			Mmr::generate_batch_proof(vec![leaf_index])
+			Mmr::generate_batch_proof(vec![block_number])
 				.and_then(|(leaves, proof)| Ok((
 					mmr::EncodableOpaqueLeaf::from_leaf(&leaves[0]),
 					mmr::BatchProof::into_single_leaf_proof(proof)?
@@ -955,11 +969,28 @@ impl_runtime_apis! {
 			Ok(Mmr::mmr_root())
 		}
 
-		fn generate_batch_proof(leaf_indices: Vec<pallet_mmr::primitives::LeafIndex>)
+		fn generate_batch_proof(block_numbers: Vec<BlockNumber>)
 			-> Result<(Vec<mmr::EncodableOpaqueLeaf>, mmr::BatchProof<mmr::Hash>), mmr::Error>
 		{
-			Mmr::generate_batch_proof(leaf_indices)
+			Mmr::generate_batch_proof(block_numbers)
 				.map(|(leaves, proof)| (leaves.into_iter().map(|leaf| mmr::EncodableOpaqueLeaf::from_leaf(&leaf)).collect(), proof))
+		}
+
+		fn generate_historical_batch_proof(
+			block_numbers: Vec<BlockNumber>,
+			best_known_block_number: BlockNumber
+		) -> Result<(Vec<mmr::EncodableOpaqueLeaf>, mmr::BatchProof<mmr::Hash>), mmr::Error> {
+			Mmr::generate_historical_batch_proof(block_numbers, best_known_block_number).map(
+				|(leaves, proof)| {
+					(
+						leaves
+							.into_iter()
+							.map(|leaf| mmr::EncodableOpaqueLeaf::from_leaf(&leaf))
+							.collect(),
+						proof,
+					)
+				},
+			)
 		}
 
 		fn verify_batch_proof(leaves: Vec<mmr::EncodableOpaqueLeaf>, proof: mmr::BatchProof<mmr::Hash>)
@@ -1056,24 +1087,12 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_rialto::ToRialtoOutboundLaneApi<Block, Balance, ToRialtoMessagePayload> for Runtime {
-		fn estimate_message_delivery_and_dispatch_fee(
-			_lane_id: bp_messages::LaneId,
-			payload: ToRialtoMessagePayload,
-			rialto_to_this_conversion_rate: Option<FixedU128>,
-		) -> Option<Balance> {
-			estimate_message_dispatch_and_delivery_fee::<WithRialtoMessageBridge>(
-				&payload,
-				WithRialtoMessageBridge::RELAYER_FEE_PERCENT,
-				rialto_to_this_conversion_rate,
-			).ok()
-		}
-
+	impl bp_rialto::ToRialtoOutboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LaneId,
 			begin: bp_messages::MessageNonce,
 			end: bp_messages::MessageNonce,
-		) -> Vec<bp_messages::OutboundMessageDetails<Balance>> {
+		) -> Vec<bp_messages::OutboundMessageDetails> {
 			bridge_runtime_common::messages_api::outbound_message_details::<
 				Runtime,
 				WithRialtoMessagesInstance,
@@ -1081,10 +1100,10 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_rialto::FromRialtoInboundLaneApi<Block, bp_rialto::Balance> for Runtime {
+	impl bp_rialto::FromRialtoInboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LaneId,
-			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails<bp_rialto::Balance>)>,
+			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails)>,
 		) -> Vec<bp_messages::InboundMessageDetails> {
 			bridge_runtime_common::messages_api::inbound_message_details::<
 				Runtime,
@@ -1093,24 +1112,12 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_rialto_parachain::ToRialtoParachainOutboundLaneApi<Block, Balance, ToRialtoParachainMessagePayload> for Runtime {
-		fn estimate_message_delivery_and_dispatch_fee(
-			_lane_id: bp_messages::LaneId,
-			payload: ToRialtoParachainMessagePayload,
-			rialto_parachain_to_this_conversion_rate: Option<FixedU128>,
-		) -> Option<Balance> {
-			estimate_message_dispatch_and_delivery_fee::<WithRialtoParachainMessageBridge>(
-				&payload,
-				WithRialtoParachainMessageBridge::RELAYER_FEE_PERCENT,
-				rialto_parachain_to_this_conversion_rate,
-			).ok()
-		}
-
+	impl bp_rialto_parachain::ToRialtoParachainOutboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LaneId,
 			begin: bp_messages::MessageNonce,
 			end: bp_messages::MessageNonce,
-		) -> Vec<bp_messages::OutboundMessageDetails<Balance>> {
+		) -> Vec<bp_messages::OutboundMessageDetails> {
 			bridge_runtime_common::messages_api::outbound_message_details::<
 				Runtime,
 				WithRialtoParachainMessagesInstance,
@@ -1118,10 +1125,10 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_rialto_parachain::FromRialtoParachainInboundLaneApi<Block, bp_rialto_parachain::Balance> for Runtime {
+	impl bp_rialto_parachain::FromRialtoParachainInboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LaneId,
-			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails<bp_rialto_parachain::Balance>)>,
+			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails)>,
 		) -> Vec<bp_messages::InboundMessageDetails> {
 			bridge_runtime_common::messages_api::inbound_message_details::<
 				Runtime,
@@ -1175,13 +1182,11 @@ impl_runtime_apis! {
 			let mut batches = Vec::<BenchmarkBatch>::new();
 			let params = (&config, &whitelist);
 
-			use bridge_runtime_common::messages_benchmarking::{prepare_message_delivery_proof, prepare_message_proof, prepare_outbound_message};
-			use bridge_runtime_common::messages;
+			use bridge_runtime_common::messages_benchmarking::{prepare_message_delivery_proof, prepare_message_proof};
 			use pallet_bridge_messages::benchmarking::{
 				Pallet as MessagesBench,
 				Config as MessagesConfig,
 				MessageDeliveryProofParams,
-				MessageParams,
 				MessageProofParams,
 			};
 			use pallet_bridge_parachains::benchmarking::{
@@ -1191,16 +1196,8 @@ impl_runtime_apis! {
 			use rialto_messages::WithRialtoMessageBridge;
 
 			impl MessagesConfig<WithRialtoMessagesInstance> for Runtime {
-				fn maximal_message_size() -> u32 {
-					messages::source::maximal_message_size::<WithRialtoMessageBridge>()
-				}
-
 				fn bridged_relayer_id() -> Self::InboundRelayer {
 					[0u8; 32].into()
-				}
-
-				fn account_balance(account: &Self::AccountId) -> Self::OutboundMessageFee {
-					pallet_balances::Pallet::<Runtime>::free_balance(account)
 				}
 
 				fn endow_account(account: &Self::AccountId) {
@@ -1208,12 +1205,6 @@ impl_runtime_apis! {
 						account,
 						Balance::MAX / 100,
 					);
-				}
-
-				fn prepare_outbound_message(
-					params: MessageParams<Self::AccountId>,
-				) -> (rialto_messages::ToRialtoMessagePayload, Balance) {
-					(prepare_outbound_message::<WithRialtoMessageBridge>(params), Self::message_fee())
 				}
 
 				fn prepare_message_proof(
@@ -1292,6 +1283,6 @@ mod tests {
 				BRIDGES_PALLETS_MAX_CALL_SIZE
 		);
 		const MAX_CALL_SIZE: usize = 230; // value from polkadot-runtime tests
-		assert!(core::mem::size_of::<Call>() <= MAX_CALL_SIZE);
+		assert!(core::mem::size_of::<RuntimeCall>() <= MAX_CALL_SIZE);
 	}
 }

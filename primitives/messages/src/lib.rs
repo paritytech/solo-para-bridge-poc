@@ -21,7 +21,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use bitvec::prelude::*;
-use bp_runtime::{messages::DispatchFeePayment, BasicOperatingMode, OperatingMode};
+use bp_runtime::{BasicOperatingMode, OperatingMode};
 use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::RuntimeDebug;
 use scale_info::TypeInfo;
@@ -32,6 +32,7 @@ pub mod storage_keys;
 pub mod target_chain;
 
 // Weight is reexported to avoid additional frame-support dependencies in related crates.
+use bp_runtime::messages::MessageDispatchResult;
 pub use frame_support::weights::Weight;
 
 /// Messages pallet operating mode.
@@ -65,16 +66,6 @@ impl OperatingMode for MessagesOperatingMode {
 	}
 }
 
-/// Messages pallet parameter.
-pub trait Parameter: frame_support::Parameter {
-	/// Save parameter value in the runtime storage.
-	fn save(&self);
-}
-
-impl Parameter for () {
-	fn save(&self) {}
-}
-
 /// Lane identifier.
 pub type LaneId = [u8; 4];
 
@@ -96,22 +87,13 @@ pub struct MessageKey {
 	pub nonce: MessageNonce,
 }
 
-/// Message data as it is stored in the storage.
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct MessageData<Fee> {
-	/// Message payload.
-	pub payload: MessagePayload,
-	/// Message delivery and dispatch fee, paid by the submitter.
-	pub fee: Fee,
-}
-
 /// Message as it is stored in the storage.
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct Message<Fee> {
+pub struct Message {
 	/// Message key.
 	pub key: MessageKey,
-	/// Message data.
-	pub data: MessageData<Fee>,
+	/// Message payload.
+	pub payload: MessagePayload,
 }
 
 /// Inbound lane data.
@@ -198,7 +180,7 @@ impl<RelayerId> InboundLaneData<RelayerId> {
 
 /// Outbound message details, returned by runtime APIs.
 #[derive(Clone, Encode, Decode, RuntimeDebug, PartialEq, Eq)]
-pub struct OutboundMessageDetails<OutboundMessageFee> {
+pub struct OutboundMessageDetails {
 	/// Nonce assigned to the message.
 	pub nonce: MessageNonce,
 	/// Message dispatch weight.
@@ -208,10 +190,6 @@ pub struct OutboundMessageDetails<OutboundMessageFee> {
 	pub dispatch_weight: Weight,
 	/// Size of the encoded message.
 	pub size: u32,
-	/// Delivery+dispatch fee paid by the message submitter at the source chain.
-	pub delivery_and_dispatch_fee: OutboundMessageFee,
-	/// Where the fee for dispatching message is paid?
-	pub dispatch_fee_payment: DispatchFeePayment,
 }
 
 /// Inbound message details, returned by runtime APIs.
@@ -239,6 +217,47 @@ pub struct UnrewardedRelayer<RelayerId> {
 	pub relayer: RelayerId,
 	/// Messages range, delivered by this relayer.
 	pub messages: DeliveredMessages,
+}
+
+/// Received messages with their dispatch result.
+#[derive(Clone, Default, Encode, Decode, RuntimeDebug, PartialEq, Eq, TypeInfo)]
+pub struct ReceivedMessages<Result> {
+	/// Id of the lane which is receiving messages.
+	pub lane: LaneId,
+	/// Result of messages which we tried to dispatch
+	pub receive_results: Vec<(MessageNonce, Result)>,
+	/// Messages which were skipped and never dispatched
+	pub skipped_for_not_enough_weight: Vec<MessageNonce>,
+}
+
+impl<Result> ReceivedMessages<Result> {
+	pub fn new(lane: LaneId, receive_results: Vec<(MessageNonce, Result)>) -> Self {
+		ReceivedMessages { lane, receive_results, skipped_for_not_enough_weight: Vec::new() }
+	}
+
+	pub fn push(&mut self, message: MessageNonce, result: Result) {
+		self.receive_results.push((message, result));
+	}
+
+	pub fn push_skipped_for_not_enough_weight(&mut self, message: MessageNonce) {
+		self.skipped_for_not_enough_weight.push(message);
+	}
+}
+
+/// Result of single message receival.
+#[derive(RuntimeDebug, Encode, Decode, PartialEq, Eq, Clone, TypeInfo)]
+pub enum ReceivalResult {
+	/// Message has been received and dispatched. Note that we don't care whether dispatch has
+	/// been successful or not - in both case message falls into this category.
+	///
+	/// The message dispatch result is also returned.
+	Dispatched(MessageDispatchResult),
+	/// Message has invalid nonce and lane has rejected to accept this message.
+	InvalidNonce,
+	/// There are too many unrewarded relayer entries at the lane.
+	TooManyUnrewardedRelayers,
+	/// There are too many unconfirmed messages at the lane.
+	TooManyUnconfirmedMessages,
 }
 
 /// Delivered messages with their dispatch result.
@@ -414,7 +433,7 @@ mod tests {
 			.len();
 			let difference = (expected_size.unwrap() as f64 - actual_size as f64).abs();
 			assert!(
-				difference / (std::cmp::min(actual_size, expected_size.unwrap() as usize) as f64) < 0.1,
+				difference / (std::cmp::min(actual_size, expected_size.unwrap()) as f64) < 0.1,
 				"Too large difference between actual ({}) and expected ({:?}) inbound lane data size. Test case: {}+{}",
 				actual_size,
 				expected_size,

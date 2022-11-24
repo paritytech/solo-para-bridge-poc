@@ -21,9 +21,8 @@ use crate::Config;
 use bp_messages::{
 	target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
 	DeliveredMessages, InboundLaneData, LaneId, MessageKey, MessageNonce, OutboundLaneData,
-	UnrewardedRelayer,
+	ReceivalResult, UnrewardedRelayer,
 };
-use bp_runtime::messages::MessageDispatchResult;
 use codec::{Decode, Encode, EncodeLike, MaxEncodedLen};
 use frame_support::{traits::Get, RuntimeDebug};
 use scale_info::{Type, TypeInfo};
@@ -31,8 +30,6 @@ use sp_std::prelude::PartialEq;
 
 /// Inbound lane storage.
 pub trait InboundLaneStorage {
-	/// Delivery and dispatch fee type on source chain.
-	type MessageFee;
 	/// Id of relayer on source chain.
 	type Relayer: Clone + PartialEq;
 
@@ -110,22 +107,6 @@ impl<T: Config<I>, I: 'static> MaxEncodedLen for StoredInboundLaneData<T, I> {
 	}
 }
 
-/// Result of single message receival.
-#[derive(RuntimeDebug, PartialEq, Eq)]
-pub enum ReceivalResult {
-	/// Message has been received and dispatched. Note that we don't care whether dispatch has
-	/// been successful or not - in both case message falls into this category.
-	///
-	/// The message dispatch result is also returned.
-	Dispatched(MessageDispatchResult),
-	/// Message has invalid nonce and lane has rejected to accept this message.
-	InvalidNonce,
-	/// There are too many unrewarded relayer entries at the lane.
-	TooManyUnrewardedRelayers,
-	/// There are too many unconfirmed messages at the lane.
-	TooManyUnconfirmedMessages,
-}
-
 /// Inbound messages lane.
 pub struct InboundLane<S> {
 	storage: S,
@@ -183,12 +164,12 @@ impl<S: InboundLaneStorage> InboundLane<S> {
 	}
 
 	/// Receive new message.
-	pub fn receive_message<P: MessageDispatch<AccountId, S::MessageFee>, AccountId>(
+	pub fn receive_message<Dispatch: MessageDispatch<AccountId>, AccountId>(
 		&mut self,
 		relayer_at_bridged_chain: &S::Relayer,
 		relayer_at_this_chain: &AccountId,
 		nonce: MessageNonce,
-		message_data: DispatchMessageData<P::DispatchPayload, S::MessageFee>,
+		message_data: DispatchMessageData<Dispatch::DispatchPayload>,
 	) -> ReceivalResult {
 		let mut data = self.storage.data();
 		let is_correct_message = nonce == data.last_delivered_nonce() + 1;
@@ -208,7 +189,7 @@ impl<S: InboundLaneStorage> InboundLane<S> {
 		}
 
 		// then, dispatch message
-		let dispatch_result = P::dispatch(
+		let dispatch_result = Dispatch::dispatch(
 			relayer_at_this_chain,
 			DispatchMessage {
 				key: MessageKey { lane_id: self.storage.id(), nonce },
@@ -242,9 +223,9 @@ mod tests {
 	use crate::{
 		inbound_lane,
 		mock::{
-			dispatch_result, message_data, run_test, unrewarded_relayer, TestMessageDispatch,
-			TestRuntime, REGULAR_PAYLOAD, TEST_LANE_ID, TEST_RELAYER_A, TEST_RELAYER_B,
-			TEST_RELAYER_C,
+			dispatch_result, inbound_message_data, run_test, unrewarded_relayer,
+			TestMessageDispatch, TestRuntime, REGULAR_PAYLOAD, TEST_LANE_ID, TEST_RELAYER_A,
+			TEST_RELAYER_B, TEST_RELAYER_C,
 		},
 		RuntimeInboundLaneStorage,
 	};
@@ -258,7 +239,7 @@ mod tests {
 				&TEST_RELAYER_A,
 				&TEST_RELAYER_A,
 				nonce,
-				message_data(REGULAR_PAYLOAD).into()
+				inbound_message_data(REGULAR_PAYLOAD)
 			),
 			ReceivalResult::Dispatched(dispatch_result(0))
 		);
@@ -386,7 +367,7 @@ mod tests {
 					&TEST_RELAYER_A,
 					&TEST_RELAYER_A,
 					10,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::InvalidNonce
 			);
@@ -406,7 +387,7 @@ mod tests {
 						&(TEST_RELAYER_A + current_nonce),
 						&(TEST_RELAYER_A + current_nonce),
 						current_nonce,
-						message_data(REGULAR_PAYLOAD).into()
+						inbound_message_data(REGULAR_PAYLOAD)
 					),
 					ReceivalResult::Dispatched(dispatch_result(0))
 				);
@@ -417,7 +398,7 @@ mod tests {
 					&(TEST_RELAYER_A + max_nonce + 1),
 					&(TEST_RELAYER_A + max_nonce + 1),
 					max_nonce + 1,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::TooManyUnrewardedRelayers,
 			);
@@ -427,7 +408,7 @@ mod tests {
 					&(TEST_RELAYER_A + max_nonce),
 					&(TEST_RELAYER_A + max_nonce),
 					max_nonce + 1,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::TooManyUnrewardedRelayers,
 			);
@@ -445,7 +426,7 @@ mod tests {
 						&TEST_RELAYER_A,
 						&TEST_RELAYER_A,
 						current_nonce,
-						message_data(REGULAR_PAYLOAD).into()
+						inbound_message_data(REGULAR_PAYLOAD)
 					),
 					ReceivalResult::Dispatched(dispatch_result(0))
 				);
@@ -456,7 +437,7 @@ mod tests {
 					&TEST_RELAYER_B,
 					&TEST_RELAYER_B,
 					max_nonce + 1,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::TooManyUnconfirmedMessages,
 			);
@@ -466,7 +447,7 @@ mod tests {
 					&TEST_RELAYER_A,
 					&TEST_RELAYER_A,
 					max_nonce + 1,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::TooManyUnconfirmedMessages,
 			);
@@ -482,7 +463,7 @@ mod tests {
 					&TEST_RELAYER_A,
 					&TEST_RELAYER_A,
 					1,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::Dispatched(dispatch_result(0))
 			);
@@ -491,7 +472,7 @@ mod tests {
 					&TEST_RELAYER_B,
 					&TEST_RELAYER_B,
 					2,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::Dispatched(dispatch_result(0))
 			);
@@ -500,7 +481,7 @@ mod tests {
 					&TEST_RELAYER_A,
 					&TEST_RELAYER_A,
 					3,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::Dispatched(dispatch_result(0))
 			);
@@ -524,7 +505,7 @@ mod tests {
 					&TEST_RELAYER_A,
 					&TEST_RELAYER_A,
 					1,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::Dispatched(dispatch_result(0))
 			);
@@ -533,7 +514,7 @@ mod tests {
 					&TEST_RELAYER_B,
 					&TEST_RELAYER_B,
 					1,
-					message_data(REGULAR_PAYLOAD).into()
+					inbound_message_data(REGULAR_PAYLOAD)
 				),
 				ReceivalResult::InvalidNonce,
 			);
@@ -554,13 +535,13 @@ mod tests {
 		run_test(|| {
 			let mut lane = inbound_lane::<TestRuntime, _>(TEST_LANE_ID);
 			let mut payload = REGULAR_PAYLOAD;
-			payload.dispatch_result.unspent_weight = 1;
+			*payload.dispatch_result.unspent_weight.ref_time_mut() = 1;
 			assert_eq!(
 				lane.receive_message::<TestMessageDispatch, _>(
 					&TEST_RELAYER_A,
 					&TEST_RELAYER_A,
 					1,
-					message_data(payload).into()
+					inbound_message_data(payload)
 				),
 				ReceivalResult::Dispatched(dispatch_result(1))
 			);

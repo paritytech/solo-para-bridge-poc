@@ -20,7 +20,8 @@
 
 use codec::{Decode, Encode, FullCodec, MaxEncodedLen};
 use frame_support::{
-	log, pallet_prelude::DispatchResult, PalletError, RuntimeDebug, StorageHasher, StorageValue,
+	log, pallet_prelude::DispatchResult, weights::Weight, PalletError, RuntimeDebug, StorageHasher,
+	StorageValue,
 };
 use frame_system::RawOrigin;
 use scale_info::TypeInfo;
@@ -31,7 +32,7 @@ use sp_std::{convert::TryFrom, fmt::Debug, vec, vec::Vec};
 
 pub use chain::{
 	AccountIdOf, AccountPublicOf, BalanceOf, BlockNumberOf, Chain, EncodedOrDecodedCall, HashOf,
-	HasherOf, HeaderOf, IndexOf, SignatureOf, TransactionEraOf,
+	HasherOf, HeaderOf, IndexOf, Parachain, SignatureOf, TransactionEraOf,
 };
 pub use frame_support::storage::storage_prefix as storage_value_final_key;
 use num_traits::{CheckedSub, One};
@@ -40,6 +41,7 @@ pub use storage_proof::{
 	record_all_keys as record_all_trie_keys, Error as StorageProofError,
 	ProofSize as StorageProofSize, StorageProofChecker,
 };
+pub use storage_types::BoundedStorageValue;
 
 #[cfg(feature = "std")]
 pub use storage_proof::craft_valid_storage_proof;
@@ -48,6 +50,7 @@ pub mod messages;
 
 mod chain;
 mod storage_proof;
+mod storage_types;
 
 // Re-export macro to aviod include paste dependency everywhere
 pub use sp_runtime::paste;
@@ -75,6 +78,12 @@ pub const ROCOCO_CHAIN_ID: ChainId = *b"roco";
 
 /// Bridge-with-Wococo instance id.
 pub const WOCOCO_CHAIN_ID: ChainId = *b"woco";
+
+/// Bridge-with-BridgeHubRococo instance id.
+pub const BRIDGE_HUB_ROCOCO_CHAIN_ID: ChainId = *b"bhro";
+
+/// Bridge-with-BridgeHubWococo instance id.
+pub const BRIDGE_HUB_WOCOCO_CHAIN_ID: ChainId = *b"bhwo";
 
 /// Call-dispatch module prefix.
 pub const CALL_DISPATCH_MODULE_PREFIX: &[u8] = b"pallet-bridge/dispatch";
@@ -401,7 +410,7 @@ pub trait OwnedBridgeModule<T: frame_system::Config> {
 	}
 
 	/// Ensure that the origin is either root, or `PalletOwner`.
-	fn ensure_owner_or_root(origin: T::Origin) -> Result<(), BadOrigin> {
+	fn ensure_owner_or_root(origin: T::RuntimeOrigin) -> Result<(), BadOrigin> {
 		match origin.into() {
 			Ok(RawOrigin::Root) => Ok(()),
 			Ok(RawOrigin::Signed(ref signer))
@@ -420,7 +429,7 @@ pub trait OwnedBridgeModule<T: frame_system::Config> {
 	}
 
 	/// Change the owner of the module.
-	fn set_owner(origin: T::Origin, maybe_owner: Option<T::AccountId>) -> DispatchResult {
+	fn set_owner(origin: T::RuntimeOrigin, maybe_owner: Option<T::AccountId>) -> DispatchResult {
 		Self::ensure_owner_or_root(origin)?;
 		match maybe_owner {
 			Some(owner) => {
@@ -438,7 +447,7 @@ pub trait OwnedBridgeModule<T: frame_system::Config> {
 
 	/// Halt or resume all/some module operations.
 	fn set_operating_mode(
-		origin: T::Origin,
+		origin: T::RuntimeOrigin,
 		operating_mode: Self::OperatingMode,
 	) -> DispatchResult {
 		Self::ensure_owner_or_root(origin)?;
@@ -452,6 +461,24 @@ pub trait OwnedBridgeModule<T: frame_system::Config> {
 pub trait FilterCall<Call> {
 	/// Checks if a runtime call is valid.
 	fn validate(call: &Call) -> TransactionValidity;
+}
+
+/// All extra operations with weights that we need in bridges.
+pub trait WeightExtraOps {
+	/// Checked division of individual components of two weights.
+	///
+	/// Divides components and returns minimal division result. Returns `None` if one
+	/// of `other` weight components is zero.
+	fn min_components_checked_div(&self, other: Weight) -> Option<u64>;
+}
+
+impl WeightExtraOps for Weight {
+	fn min_components_checked_div(&self, other: Weight) -> Option<u64> {
+		Some(sp_std::cmp::min(
+			self.ref_time().checked_div(other.ref_time())?,
+			self.proof_size().checked_div(other.proof_size())?,
+		))
+	}
 }
 
 #[cfg(test)]

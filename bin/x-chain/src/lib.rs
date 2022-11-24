@@ -19,11 +19,11 @@ pub mod pallet {
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
 	pub trait Config<I: 'static = ()>: frame_system::Config {
-		type Event: From<Event<Self, I>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self, I>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		type SharedStateAccess: SharedState<I>;
 		/// Origins we allow to respond with a query.
 		type CrossChainOrigin: EnsureOrigin<
-			<Self as frame_system::Config>::Origin,
+			<Self as frame_system::Config>::RuntimeOrigin,
 			Success = MultiLocation,
 		>;
 	}

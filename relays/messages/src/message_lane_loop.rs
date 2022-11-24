@@ -30,10 +30,9 @@ use async_trait::async_trait;
 use futures::{channel::mpsc::unbounded, future::FutureExt, stream::StreamExt};
 
 use bp_messages::{LaneId, MessageNonce, UnrewardedRelayersState, Weight};
-use bp_runtime::messages::DispatchFeePayment;
 use relay_utils::{
 	interval, metrics::MetricsParams, process_future_result, relay_loop::Client as RelayClient,
-	retry_backoff, FailedClient,
+	retry_backoff, FailedClient, TransactionTracker,
 };
 
 use crate::{
@@ -41,12 +40,11 @@ use crate::{
 	message_race_delivery::run as run_message_delivery_race,
 	message_race_receiving::run as run_message_receiving_race,
 	metrics::MessageLaneLoopMetrics,
-	relay_strategy::RelayStrategy,
 };
 
 /// Message lane loop configuration params.
 #[derive(Debug, Clone)]
-pub struct Params<Strategy: RelayStrategy> {
+pub struct Params {
 	/// Id of lane this loop is servicing.
 	pub lane: LaneId,
 	/// Interval at which we ask target node about its updates.
@@ -55,25 +53,13 @@ pub struct Params<Strategy: RelayStrategy> {
 	pub target_tick: Duration,
 	/// Delay between moments when connection error happens and our reconnect attempt.
 	pub reconnect_delay: Duration,
-	/// The loop will auto-restart if there has been no updates during this period.
-	pub stall_timeout: Duration,
 	/// Message delivery race parameters.
-	pub delivery_params: MessageDeliveryParams<Strategy>,
-}
-
-/// Relayer operating mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RelayerMode {
-	/// The relayer doesn't care about rewards.
-	Altruistic,
-	/// The relayer will deliver all messages and confirmations as long as he's not losing any
-	/// funds.
-	Rational,
+	pub delivery_params: MessageDeliveryParams,
 }
 
 /// Message delivery race parameters.
 #[derive(Debug, Clone)]
-pub struct MessageDeliveryParams<Strategy: RelayStrategy> {
+pub struct MessageDeliveryParams {
 	/// Maximal number of unconfirmed relayer entries at the inbound lane. If there's that number
 	/// of entries in the `InboundLaneData::relayers` set, all new messages will be rejected until
 	/// reward payment will be proved (by including outbound lane state to the message delivery
@@ -89,8 +75,6 @@ pub struct MessageDeliveryParams<Strategy: RelayStrategy> {
 	pub max_messages_weight_in_single_batch: Weight,
 	/// Maximal cumulative size of relayed messages in single delivery transaction.
 	pub max_messages_size_in_single_batch: u32,
-	/// Relay strategy
-	pub relay_strategy: Strategy,
 }
 
 /// Message details.
@@ -102,8 +86,6 @@ pub struct MessageDetails<SourceChainBalance> {
 	pub size: u32,
 	/// The relayer reward paid in the source chain tokens.
 	pub reward: SourceChainBalance,
-	/// Where the fee for dispatching message is paid?
-	pub dispatch_fee_payment: DispatchFeePayment,
 }
 
 /// Messages details map.
@@ -119,9 +101,20 @@ pub struct MessageProofParameters {
 	pub dispatch_weight: Weight,
 }
 
+/// Artifacts of submitting nonces proof.
+pub struct NoncesSubmitArtifacts<T> {
+	/// Submitted nonces range.
+	pub nonces: RangeInclusive<MessageNonce>,
+	/// Submitted transaction tracker.
+	pub tx_tracker: T,
+}
+
 /// Source client trait.
 #[async_trait]
 pub trait SourceClient<P: MessageLane>: RelayClient {
+	/// Transaction tracker to track submitted transactions.
+	type TransactionTracker: TransactionTracker<HeaderId = SourceHeaderIdOf<P>>;
+
 	/// Returns state of the client.
 	async fn state(&self) -> Result<SourceClientState<P>, Self::Error>;
 
@@ -160,18 +153,18 @@ pub trait SourceClient<P: MessageLane>: RelayClient {
 		&self,
 		generated_at_block: TargetHeaderIdOf<P>,
 		proof: P::MessagesReceivingProof,
-	) -> Result<(), Self::Error>;
+	) -> Result<Self::TransactionTracker, Self::Error>;
 
 	/// We need given finalized target header on source to continue synchronization.
 	async fn require_target_header_on_source(&self, id: TargetHeaderIdOf<P>);
-
-	/// Estimate cost of single message confirmation transaction in source chain tokens.
-	async fn estimate_confirmation_transaction(&self) -> P::SourceChainBalance;
 }
 
 /// Target client trait.
 #[async_trait]
 pub trait TargetClient<P: MessageLane>: RelayClient {
+	/// Transaction tracker to track submitted transactions.
+	type TransactionTracker: TransactionTracker<HeaderId = TargetHeaderIdOf<P>>;
+
 	/// Returns state of the client.
 	async fn state(&self) -> Result<TargetClientState<P>, Self::Error>;
 
@@ -205,22 +198,10 @@ pub trait TargetClient<P: MessageLane>: RelayClient {
 		generated_at_header: SourceHeaderIdOf<P>,
 		nonces: RangeInclusive<MessageNonce>,
 		proof: P::MessagesProof,
-	) -> Result<RangeInclusive<MessageNonce>, Self::Error>;
+	) -> Result<NoncesSubmitArtifacts<Self::TransactionTracker>, Self::Error>;
 
 	/// We need given finalized source header on target to continue synchronization.
 	async fn require_source_header_on_target(&self, id: SourceHeaderIdOf<P>);
-
-	/// Estimate cost of messages delivery transaction in source chain tokens.
-	///
-	/// Please keep in mind that the returned cost must be converted to the source chain
-	/// tokens, even though the transaction fee will be paid in the target chain tokens.
-	async fn estimate_delivery_transaction_in_source_tokens(
-		&self,
-		nonces: RangeInclusive<MessageNonce>,
-		total_prepaid_nonces: MessageNonce,
-		total_dispatch_weight: Weight,
-		total_size: u32,
-	) -> Result<P::SourceChainBalance, Self::Error>;
 }
 
 /// State of the client.
@@ -260,8 +241,8 @@ pub fn metrics_prefix<P: MessageLane>(lane: &LaneId) -> String {
 }
 
 /// Run message lane service loop.
-pub async fn run<P: MessageLane, Strategy: RelayStrategy>(
-	params: Params<Strategy>,
+pub async fn run<P: MessageLane>(
+	params: Params,
 	source_client: impl SourceClient<P>,
 	target_client: impl TargetClient<P>,
 	metrics_params: MetricsParams,
@@ -271,11 +252,7 @@ pub async fn run<P: MessageLane, Strategy: RelayStrategy>(
 	relay_utils::relay_loop(source_client, target_client)
 		.reconnect_delay(params.reconnect_delay)
 		.with_metrics(metrics_params)
-		.loop_metric(MessageLaneLoopMetrics::new(
-			Some(&metrics_prefix::<P>(&params.lane)),
-			P::SOURCE_NAME,
-			P::TARGET_NAME,
-		)?)?
+		.loop_metric(MessageLaneLoopMetrics::new(Some(&metrics_prefix::<P>(&params.lane)))?)?
 		.expose()
 		.await?
 		.run(metrics_prefix::<P>(&params.lane), move |source_client, target_client, metrics| {
@@ -292,13 +269,8 @@ pub async fn run<P: MessageLane, Strategy: RelayStrategy>(
 
 /// Run one-way message delivery loop until connection with target or source node is lost, or exit
 /// signal is received.
-async fn run_until_connection_lost<
-	P: MessageLane,
-	Strategy: RelayStrategy,
-	SC: SourceClient<P>,
-	TC: TargetClient<P>,
->(
-	params: Params<Strategy>,
+async fn run_until_connection_lost<P: MessageLane, SC: SourceClient<P>, TC: TargetClient<P>>(
+	params: Params,
 	source_client: SC,
 	target_client: TC,
 	metrics_msg: Option<MessageLaneLoopMetrics>,
@@ -327,7 +299,6 @@ async fn run_until_connection_lost<
 		delivery_source_state_receiver,
 		target_client.clone(),
 		delivery_target_state_receiver,
-		params.stall_timeout,
 		metrics_msg.clone(),
 		params.delivery_params,
 	)
@@ -342,7 +313,6 @@ async fn run_until_connection_lost<
 		receiving_source_state_receiver,
 		target_client.clone(),
 		receiving_target_state_receiver,
-		params.stall_timeout,
 		metrics_msg.clone(),
 	)
 	.fuse();
@@ -465,18 +435,13 @@ pub(crate) mod tests {
 	use futures::stream::StreamExt;
 	use parking_lot::Mutex;
 
-	use relay_utils::{HeaderId, MaybeConnectionError};
-
-	use crate::relay_strategy::AltruisticStrategy;
+	use relay_utils::{HeaderId, MaybeConnectionError, TrackedTransactionStatus};
 
 	use super::*;
 
 	pub fn header_id(number: TestSourceHeaderNumber) -> TestSourceHeaderId {
 		HeaderId(number, number)
 	}
-
-	pub const CONFIRMATION_TRANSACTION_COST: TestSourceChainBalance = 1;
-	pub const BASE_MESSAGE_DELIVERY_TRANSACTION_COST: TestSourceChainBalance = 1;
 
 	pub type TestSourceChainBalance = u64;
 	pub type TestSourceHeaderId = HeaderId<TestSourceHeaderNumber, TestSourceHeaderHash>;
@@ -518,19 +483,39 @@ pub(crate) mod tests {
 		type TargetHeaderHash = TestTargetHeaderHash;
 	}
 
-	#[derive(Debug, Default, Clone)]
+	#[derive(Clone, Debug)]
+	pub struct TestTransactionTracker(TrackedTransactionStatus<TestTargetHeaderId>);
+
+	impl Default for TestTransactionTracker {
+		fn default() -> TestTransactionTracker {
+			TestTransactionTracker(TrackedTransactionStatus::Finalized(Default::default()))
+		}
+	}
+
+	#[async_trait]
+	impl TransactionTracker for TestTransactionTracker {
+		type HeaderId = TestTargetHeaderId;
+
+		async fn wait(self) -> TrackedTransactionStatus<TestTargetHeaderId> {
+			self.0
+		}
+	}
+
+	#[derive(Debug, Clone)]
 	pub struct TestClientData {
 		is_source_fails: bool,
 		is_source_reconnected: bool,
 		source_state: SourceClientState<TestMessageLane>,
 		source_latest_generated_nonce: MessageNonce,
 		source_latest_confirmed_received_nonce: MessageNonce,
+		source_tracked_transaction_status: TrackedTransactionStatus<TestTargetHeaderId>,
 		submitted_messages_receiving_proofs: Vec<TestMessagesReceivingProof>,
 		is_target_fails: bool,
 		is_target_reconnected: bool,
 		target_state: SourceClientState<TestMessageLane>,
 		target_latest_received_nonce: MessageNonce,
 		target_latest_confirmed_received_nonce: MessageNonce,
+		target_tracked_transaction_status: TrackedTransactionStatus<TestTargetHeaderId>,
 		submitted_messages_proofs: Vec<TestMessagesProof>,
 		target_to_source_header_required: Option<TestTargetHeaderId>,
 		target_to_source_header_requirements: Vec<TestTargetHeaderId>,
@@ -538,10 +523,42 @@ pub(crate) mod tests {
 		source_to_target_header_requirements: Vec<TestSourceHeaderId>,
 	}
 
+	impl Default for TestClientData {
+		fn default() -> TestClientData {
+			TestClientData {
+				is_source_fails: false,
+				is_source_reconnected: false,
+				source_state: Default::default(),
+				source_latest_generated_nonce: 0,
+				source_latest_confirmed_received_nonce: 0,
+				source_tracked_transaction_status: TrackedTransactionStatus::Finalized(HeaderId(
+					0,
+					Default::default(),
+				)),
+				submitted_messages_receiving_proofs: Vec::new(),
+				is_target_fails: false,
+				is_target_reconnected: false,
+				target_state: Default::default(),
+				target_latest_received_nonce: 0,
+				target_latest_confirmed_received_nonce: 0,
+				target_tracked_transaction_status: TrackedTransactionStatus::Finalized(HeaderId(
+					0,
+					Default::default(),
+				)),
+				submitted_messages_proofs: Vec::new(),
+				target_to_source_header_required: None,
+				target_to_source_header_requirements: Vec::new(),
+				source_to_target_header_required: None,
+				source_to_target_header_requirements: Vec::new(),
+			}
+		}
+	}
+
 	#[derive(Clone)]
 	pub struct TestSourceClient {
 		data: Arc<Mutex<TestClientData>>,
 		tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
+		post_tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
 	}
 
 	impl Default for TestSourceClient {
@@ -549,6 +566,7 @@ pub(crate) mod tests {
 			TestSourceClient {
 				data: Arc::new(Mutex::new(TestClientData::default())),
 				tick: Arc::new(|_| {}),
+				post_tick: Arc::new(|_| {}),
 			}
 		}
 	}
@@ -562,6 +580,7 @@ pub(crate) mod tests {
 				let mut data = self.data.lock();
 				(self.tick)(&mut data);
 				data.is_source_reconnected = true;
+				(self.post_tick)(&mut data);
 			}
 			Ok(())
 		}
@@ -569,12 +588,15 @@ pub(crate) mod tests {
 
 	#[async_trait]
 	impl SourceClient<TestMessageLane> for TestSourceClient {
+		type TransactionTracker = TestTransactionTracker;
+
 		async fn state(&self) -> Result<SourceClientState<TestMessageLane>, TestError> {
 			let mut data = self.data.lock();
 			(self.tick)(&mut data);
 			if data.is_source_fails {
 				return Err(TestError)
 			}
+			(self.post_tick)(&mut data);
 			Ok(data.source_state.clone())
 		}
 
@@ -587,6 +609,7 @@ pub(crate) mod tests {
 			if data.is_source_fails {
 				return Err(TestError)
 			}
+			(self.post_tick)(&mut data);
 			Ok((id, data.source_latest_generated_nonce))
 		}
 
@@ -596,6 +619,7 @@ pub(crate) mod tests {
 		) -> Result<(SourceHeaderIdOf<TestMessageLane>, MessageNonce), TestError> {
 			let mut data = self.data.lock();
 			(self.tick)(&mut data);
+			(self.post_tick)(&mut data);
 			Ok((id, data.source_latest_confirmed_received_nonce))
 		}
 
@@ -609,10 +633,9 @@ pub(crate) mod tests {
 					(
 						nonce,
 						MessageDetails {
-							dispatch_weight: 1,
+							dispatch_weight: Weight::from_ref_time(1),
 							size: 1,
 							reward: 1,
-							dispatch_fee_payment: DispatchFeePayment::AtSourceChain,
 						},
 					)
 				})
@@ -630,6 +653,7 @@ pub(crate) mod tests {
 		> {
 			let mut data = self.data.lock();
 			(self.tick)(&mut data);
+			(self.post_tick)(&mut data);
 			Ok((
 				id,
 				nonces.clone(),
@@ -648,7 +672,7 @@ pub(crate) mod tests {
 			&self,
 			_generated_at_block: TargetHeaderIdOf<TestMessageLane>,
 			proof: TestMessagesReceivingProof,
-		) -> Result<(), TestError> {
+		) -> Result<Self::TransactionTracker, TestError> {
 			let mut data = self.data.lock();
 			(self.tick)(&mut data);
 			data.source_state.best_self =
@@ -656,7 +680,8 @@ pub(crate) mod tests {
 			data.source_state.best_finalized_self = data.source_state.best_self;
 			data.submitted_messages_receiving_proofs.push(proof);
 			data.source_latest_confirmed_received_nonce = proof;
-			Ok(())
+			(self.post_tick)(&mut data);
+			Ok(TestTransactionTracker(data.source_tracked_transaction_status))
 		}
 
 		async fn require_target_header_on_source(&self, id: TargetHeaderIdOf<TestMessageLane>) {
@@ -664,10 +689,7 @@ pub(crate) mod tests {
 			data.target_to_source_header_required = Some(id);
 			data.target_to_source_header_requirements.push(id);
 			(self.tick)(&mut data);
-		}
-
-		async fn estimate_confirmation_transaction(&self) -> TestSourceChainBalance {
-			CONFIRMATION_TRANSACTION_COST
+			(self.post_tick)(&mut data);
 		}
 	}
 
@@ -675,6 +697,7 @@ pub(crate) mod tests {
 	pub struct TestTargetClient {
 		data: Arc<Mutex<TestClientData>>,
 		tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
+		post_tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
 	}
 
 	impl Default for TestTargetClient {
@@ -682,6 +705,7 @@ pub(crate) mod tests {
 			TestTargetClient {
 				data: Arc::new(Mutex::new(TestClientData::default())),
 				tick: Arc::new(|_| {}),
+				post_tick: Arc::new(|_| {}),
 			}
 		}
 	}
@@ -695,6 +719,7 @@ pub(crate) mod tests {
 				let mut data = self.data.lock();
 				(self.tick)(&mut data);
 				data.is_target_reconnected = true;
+				(self.post_tick)(&mut data);
 			}
 			Ok(())
 		}
@@ -702,12 +727,15 @@ pub(crate) mod tests {
 
 	#[async_trait]
 	impl TargetClient<TestMessageLane> for TestTargetClient {
+		type TransactionTracker = TestTransactionTracker;
+
 		async fn state(&self) -> Result<TargetClientState<TestMessageLane>, TestError> {
 			let mut data = self.data.lock();
 			(self.tick)(&mut data);
 			if data.is_target_fails {
 				return Err(TestError)
 			}
+			(self.post_tick)(&mut data);
 			Ok(data.target_state.clone())
 		}
 
@@ -720,6 +748,7 @@ pub(crate) mod tests {
 			if data.is_target_fails {
 				return Err(TestError)
 			}
+			(self.post_tick)(&mut data);
 			Ok((id, data.target_latest_received_nonce))
 		}
 
@@ -747,6 +776,7 @@ pub(crate) mod tests {
 			if data.is_target_fails {
 				return Err(TestError)
 			}
+			(self.post_tick)(&mut data);
 			Ok((id, data.target_latest_confirmed_received_nonce))
 		}
 
@@ -762,7 +792,7 @@ pub(crate) mod tests {
 			_generated_at_header: SourceHeaderIdOf<TestMessageLane>,
 			nonces: RangeInclusive<MessageNonce>,
 			proof: TestMessagesProof,
-		) -> Result<RangeInclusive<MessageNonce>, TestError> {
+		) -> Result<NoncesSubmitArtifacts<Self::TransactionTracker>, TestError> {
 			let mut data = self.data.lock();
 			(self.tick)(&mut data);
 			if data.is_target_fails {
@@ -777,7 +807,11 @@ pub(crate) mod tests {
 					target_latest_confirmed_received_nonce;
 			}
 			data.submitted_messages_proofs.push(proof);
-			Ok(nonces)
+			(self.post_tick)(&mut data);
+			Ok(NoncesSubmitArtifacts {
+				nonces,
+				tx_tracker: TestTransactionTracker(data.target_tracked_transaction_status),
+			})
 		}
 
 		async fn require_source_header_on_target(&self, id: SourceHeaderIdOf<TestMessageLane>) {
@@ -785,46 +819,43 @@ pub(crate) mod tests {
 			data.source_to_target_header_required = Some(id);
 			data.source_to_target_header_requirements.push(id);
 			(self.tick)(&mut data);
-		}
-
-		async fn estimate_delivery_transaction_in_source_tokens(
-			&self,
-			nonces: RangeInclusive<MessageNonce>,
-			_total_prepaid_nonces: MessageNonce,
-			total_dispatch_weight: Weight,
-			total_size: u32,
-		) -> Result<TestSourceChainBalance, TestError> {
-			Ok(BASE_MESSAGE_DELIVERY_TRANSACTION_COST * (nonces.end() - nonces.start() + 1) +
-				total_dispatch_weight +
-				total_size as TestSourceChainBalance)
+			(self.post_tick)(&mut data);
 		}
 	}
 
 	fn run_loop_test(
 		data: TestClientData,
 		source_tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
+		source_post_tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
 		target_tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
+		target_post_tick: Arc<dyn Fn(&mut TestClientData) + Send + Sync>,
 		exit_signal: impl Future<Output = ()> + 'static + Send,
 	) -> TestClientData {
 		async_std::task::block_on(async {
 			let data = Arc::new(Mutex::new(data));
 
-			let source_client = TestSourceClient { data: data.clone(), tick: source_tick };
-			let target_client = TestTargetClient { data: data.clone(), tick: target_tick };
+			let source_client = TestSourceClient {
+				data: data.clone(),
+				tick: source_tick,
+				post_tick: source_post_tick,
+			};
+			let target_client = TestTargetClient {
+				data: data.clone(),
+				tick: target_tick,
+				post_tick: target_post_tick,
+			};
 			let _ = run(
 				Params {
 					lane: [0, 0, 0, 0],
 					source_tick: Duration::from_millis(100),
 					target_tick: Duration::from_millis(100),
 					reconnect_delay: Duration::from_millis(0),
-					stall_timeout: Duration::from_millis(60 * 1000),
 					delivery_params: MessageDeliveryParams {
 						max_unrewarded_relayer_entries_at_target: 4,
 						max_unconfirmed_nonces_at_target: 4,
 						max_messages_in_single_batch: 4,
-						max_messages_weight_in_single_batch: 4,
+						max_messages_weight_in_single_batch: Weight::from_ref_time(4),
 						max_messages_size_in_single_batch: 4,
-						relay_strategy: AltruisticStrategy,
 					},
 				},
 				source_client,
@@ -869,6 +900,7 @@ pub(crate) mod tests {
 					data.is_target_fails = true;
 				}
 			}),
+			Arc::new(|_| {}),
 			Arc::new(move |data: &mut TestClientData| {
 				if data.is_target_reconnected {
 					data.is_target_fails = false;
@@ -883,10 +915,139 @@ pub(crate) mod tests {
 					exit_sender.unbounded_send(()).unwrap();
 				}
 			}),
+			Arc::new(|_| {}),
 			exit_receiver.into_future().map(|(_, _)| ()),
 		);
 
 		assert_eq!(result.submitted_messages_proofs, vec![(1..=1, None)],);
+	}
+
+	#[test]
+	fn message_lane_loop_is_able_to_recover_from_race_stall() {
+		// with this configuration, both source and target clients will lose their transactions =>
+		// reconnect will happen
+		let (source_exit_sender, exit_receiver) = unbounded();
+		let target_exit_sender = source_exit_sender.clone();
+		let result = run_loop_test(
+			TestClientData {
+				source_state: ClientState {
+					best_self: HeaderId(0, 0),
+					best_finalized_self: HeaderId(0, 0),
+					best_finalized_peer_at_best_self: HeaderId(0, 0),
+					actual_best_finalized_peer_at_best_self: HeaderId(0, 0),
+				},
+				source_latest_generated_nonce: 1,
+				source_tracked_transaction_status: TrackedTransactionStatus::Lost,
+				target_state: ClientState {
+					best_self: HeaderId(0, 0),
+					best_finalized_self: HeaderId(0, 0),
+					best_finalized_peer_at_best_self: HeaderId(0, 0),
+					actual_best_finalized_peer_at_best_self: HeaderId(0, 0),
+				},
+				target_latest_received_nonce: 0,
+				target_tracked_transaction_status: TrackedTransactionStatus::Lost,
+				..Default::default()
+			},
+			Arc::new(move |data: &mut TestClientData| {
+				if data.is_source_reconnected {
+					data.source_tracked_transaction_status =
+						TrackedTransactionStatus::Finalized(Default::default());
+				}
+				if data.is_source_reconnected && data.is_target_reconnected {
+					source_exit_sender.unbounded_send(()).unwrap();
+				}
+			}),
+			Arc::new(|_| {}),
+			Arc::new(move |data: &mut TestClientData| {
+				if data.is_target_reconnected {
+					data.target_tracked_transaction_status =
+						TrackedTransactionStatus::Finalized(Default::default());
+				}
+				if data.is_source_reconnected && data.is_target_reconnected {
+					target_exit_sender.unbounded_send(()).unwrap();
+				}
+			}),
+			Arc::new(|_| {}),
+			exit_receiver.into_future().map(|(_, _)| ()),
+		);
+
+		assert!(result.is_source_reconnected);
+	}
+
+	#[test]
+	fn message_lane_loop_is_able_to_recover_from_unsuccessful_transaction() {
+		// with this configuration, both source and target clients will mine their transactions, but
+		// their corresponding nonce won't be udpated => reconnect will happen
+		let (exit_sender, exit_receiver) = unbounded();
+		let result = run_loop_test(
+			TestClientData {
+				source_state: ClientState {
+					best_self: HeaderId(0, 0),
+					best_finalized_self: HeaderId(0, 0),
+					best_finalized_peer_at_best_self: HeaderId(0, 0),
+					actual_best_finalized_peer_at_best_self: HeaderId(0, 0),
+				},
+				source_latest_generated_nonce: 1,
+				target_state: ClientState {
+					best_self: HeaderId(0, 0),
+					best_finalized_self: HeaderId(0, 0),
+					best_finalized_peer_at_best_self: HeaderId(0, 0),
+					actual_best_finalized_peer_at_best_self: HeaderId(0, 0),
+				},
+				target_latest_received_nonce: 0,
+				..Default::default()
+			},
+			Arc::new(move |data: &mut TestClientData| {
+				// blocks are produced on every tick
+				data.source_state.best_self =
+					HeaderId(data.source_state.best_self.0 + 1, data.source_state.best_self.1 + 1);
+				data.source_state.best_finalized_self = data.source_state.best_self;
+				// syncing target headers -> source chain
+				if let Some(last_requirement) = data.target_to_source_header_requirements.last() {
+					if *last_requirement != data.source_state.best_finalized_peer_at_best_self {
+						data.source_state.best_finalized_peer_at_best_self = *last_requirement;
+					}
+				}
+			}),
+			Arc::new(move |data: &mut TestClientData| {
+				// if it is the first time we're submitting delivery proof, let's revert changes
+				// to source status => then the delivery confirmation transaction is "finalized",
+				// but the state is not altered
+				if data.submitted_messages_receiving_proofs.len() == 1 {
+					data.source_latest_confirmed_received_nonce = 0;
+				}
+			}),
+			Arc::new(move |data: &mut TestClientData| {
+				// blocks are produced on every tick
+				data.target_state.best_self =
+					HeaderId(data.target_state.best_self.0 + 1, data.target_state.best_self.1 + 1);
+				data.target_state.best_finalized_self = data.target_state.best_self;
+				// syncing source headers -> target chain
+				if let Some(last_requirement) = data.source_to_target_header_requirements.last() {
+					if *last_requirement != data.target_state.best_finalized_peer_at_best_self {
+						data.target_state.best_finalized_peer_at_best_self = *last_requirement;
+					}
+				}
+				// if source has received all messages receiving confirmations => stop
+				if data.source_latest_confirmed_received_nonce == 1 {
+					exit_sender.unbounded_send(()).unwrap();
+				}
+			}),
+			Arc::new(move |data: &mut TestClientData| {
+				// if it is the first time we're submitting messages proof, let's revert changes
+				// to target status => then the messages delivery transaction is "finalized", but
+				// the state is not altered
+				if data.submitted_messages_proofs.len() == 1 {
+					data.target_latest_received_nonce = 0;
+					data.target_latest_confirmed_received_nonce = 0;
+				}
+			}),
+			exit_receiver.into_future().map(|(_, _)| ()),
+		);
+
+		assert!(result.is_source_reconnected);
+		assert_eq!(result.submitted_messages_proofs.len(), 2);
+		assert_eq!(result.submitted_messages_receiving_proofs.len(), 2);
 	}
 
 	#[test]
@@ -930,6 +1091,7 @@ pub(crate) mod tests {
 					}
 				}
 			}),
+			Arc::new(|_| {}),
 			Arc::new(move |data: &mut TestClientData| {
 				// blocks are produced on every tick
 				data.target_state.best_self =
@@ -954,6 +1116,7 @@ pub(crate) mod tests {
 					exit_sender.unbounded_send(()).unwrap();
 				}
 			}),
+			Arc::new(|_| {}),
 			exit_receiver.into_future().map(|(_, _)| ()),
 		);
 

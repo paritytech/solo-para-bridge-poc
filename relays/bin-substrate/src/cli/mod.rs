@@ -26,7 +26,6 @@ use bp_messages::LaneId;
 
 pub(crate) mod bridge;
 pub(crate) mod encode_message;
-pub(crate) mod estimate_fee;
 pub(crate) mod send_message;
 
 mod chain_schema;
@@ -74,8 +73,6 @@ pub enum Command {
 	/// The message is being sent to the source chain, delivered to the target chain and dispatched
 	/// there.
 	SendMessage(send_message::SendMessage),
-	/// Estimate Delivery and Dispatch Fee required for message submission to messages pallet.
-	EstimateFee(estimate_fee::EstimateFee),
 	/// Resubmit transactions with increased tip if they are stalled.
 	ResubmitTransactions(resubmit_transactions::ResubmitTransactions),
 	/// Register parachain.
@@ -111,7 +108,6 @@ impl Command {
 			Self::RelayHeadersAndMessages(arg) => arg.run().await?,
 			Self::InitBridge(arg) => arg.run().await?,
 			Self::SendMessage(arg) => arg.run().await?,
-			Self::EstimateFee(arg) => arg.run().await?,
 			Self::ResubmitTransactions(arg) => arg.run().await?,
 			Self::RegisterParachain(arg) => arg.run().await?,
 			Self::RelayParachains(arg) => arg.run().await?,
@@ -163,17 +159,14 @@ impl Balance {
 /// Used to abstract away CLI commands.
 pub trait CliChain: relay_substrate_client::Chain {
 	/// Current version of the chain runtime, known to relay.
-	const RUNTIME_VERSION: sp_version::RuntimeVersion;
+	///
+	/// can be `None` if relay is not going to submit transactions to that chain.
+	const RUNTIME_VERSION: Option<sp_version::RuntimeVersion>;
 
 	/// Crypto KeyPair type used to send messages.
 	///
 	/// In case of chains supporting multiple cryptos, pick one used by the CLI.
 	type KeyPair: sp_core::crypto::Pair;
-
-	/// Bridge Message Payload type.
-	///
-	/// TODO [#854] This should be removed in favor of target-specifc types.
-	type MessagePayload;
 
 	/// Numeric value of SS58 format.
 	fn ss58_format() -> u16;
@@ -213,7 +206,7 @@ impl std::str::FromStr for HexBytes {
 
 impl std::fmt::Debug for HexBytes {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(fmt, "0x{}", self)
+		write!(fmt, "0x{self}")
 	}
 }
 
@@ -273,7 +266,7 @@ where
 
 		V::from_str(s)
 			.map(ExplicitOrMaximal::Explicit)
-			.map_err(|e| format!("Failed to parse '{:?}'. Expected 'max' or explicit value", e))
+			.map_err(|e| format!("Failed to parse '{e:?}'. Expected 'max' or explicit value"))
 	}
 }
 
@@ -296,7 +289,7 @@ mod tests {
 	fn hex_bytes_display_matches_from_str_for_clap() {
 		// given
 		let hex = HexBytes(vec![1, 2, 3, 4]);
-		let display = format!("{}", hex);
+		let display = format!("{hex}");
 
 		// when
 		let hex2: HexBytes = display.parse().unwrap();

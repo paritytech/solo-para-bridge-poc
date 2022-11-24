@@ -20,6 +20,7 @@ pub use bp_runtime::HeaderId;
 pub use error::Error;
 pub use relay_loop::{relay_loop, relay_metrics};
 
+use async_trait::async_trait;
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use futures::future::FutureExt;
 use std::time::Duration;
@@ -119,6 +120,25 @@ pub trait MaybeConnectionError {
 	fn is_connection_error(&self) -> bool;
 }
 
+/// Final status of the tracked transaction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrackedTransactionStatus<BlockId> {
+	/// Transaction has been lost.
+	Lost,
+	/// Transaction has been mined and finalized at given block.
+	Finalized(BlockId),
+}
+
+/// Transaction tracker.
+#[async_trait]
+pub trait TransactionTracker: Send {
+	/// Header id, used by the chain.
+	type HeaderId: Clone + Send;
+
+	/// Wait until transaction is either finalized or invalidated/lost.
+	async fn wait(self) -> TrackedTransactionStatus<Self::HeaderId>;
+}
+
 /// Stringified error that may be either connection-related or not.
 #[derive(Error, Debug)]
 pub enum StringifiedMaybeConnectionError {
@@ -169,12 +189,12 @@ pub fn format_ids<Id: std::fmt::Debug>(mut ids: impl ExactSizeIterator<Item = Id
 		2 => {
 			let id0 = ids.next().expect(NTH_PROOF);
 			let id1 = ids.next().expect(NTH_PROOF);
-			format!("[{:?}, {:?}]", id0, id1)
+			format!("[{id0:?}, {id1:?}]")
 		},
 		len => {
 			let id0 = ids.next().expect(NTH_PROOF);
 			let id_last = ids.last().expect(NTH_PROOF);
-			format!("{}:[{:?} ... {:?}]", len, id0, id_last)
+			format!("{len}:[{id0:?} ... {id_last:?}]")
 		},
 	}
 }
@@ -216,6 +236,16 @@ impl ProcessFutureResult {
 		match self {
 			ProcessFutureResult::Success => true,
 			ProcessFutureResult::Failed | ProcessFutureResult::ConnectionFailed => false,
+		}
+	}
+
+	/// Returns `Ok(())` if future has succeeded.
+	/// Returns `Err(failed_client)` otherwise.
+	pub fn fail_if_error(self, failed_client: FailedClient) -> Result<(), FailedClient> {
+		if self.is_ok() {
+			Ok(())
+		} else {
+			Err(failed_client)
 		}
 	}
 

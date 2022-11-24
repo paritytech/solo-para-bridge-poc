@@ -24,6 +24,8 @@
 //! 3) declare a new struct for the added bridge and implement the `Full2WayBridge` trait for it.
 
 #[macro_use]
+mod parachain_to_parachain;
+#[macro_use]
 mod relay_to_relay;
 #[macro_use]
 mod relay_to_parachain;
@@ -31,7 +33,6 @@ mod relay_to_parachain;
 use async_trait::async_trait;
 use std::{marker::PhantomData, sync::Arc};
 use structopt::StructOpt;
-use strum::VariantNames;
 
 use futures::{FutureExt, TryFutureExt};
 use relay_to_parachain::*;
@@ -50,31 +51,20 @@ use crate::{
 			RelayToRelayHeadersCliBridge,
 		},
 		chain_schema::*,
-		relay_messages::RelayerMode,
 		CliChain, HexLaneId, PrometheusParams,
 	},
 	declare_chain_cli_schema,
 };
 use bp_messages::LaneId;
 use bp_runtime::{BalanceOf, BlockNumberOf};
-use messages_relay::relay_strategy::MixStrategy;
 use relay_substrate_client::{
-	AccountIdOf, AccountKeyPairOf, Chain, ChainWithBalances, Client, TransactionSignScheme,
+	AccountIdOf, AccountKeyPairOf, Chain, ChainWithBalances, ChainWithTransactions, Client,
 };
 use relay_utils::metrics::MetricsParams;
 use sp_core::Pair;
 use substrate_relay_helper::{
-	messages_lane::MessagesRelayParams, messages_metrics::StandaloneMessagesMetrics,
-	on_demand::OnDemandRelay, TaggedAccount, TransactionParams,
+	messages_lane::MessagesRelayParams, on_demand::OnDemandRelay, TaggedAccount, TransactionParams,
 };
-
-/// Maximal allowed conversion rate error ratio (abs(real - stored) / stored) that we allow.
-///
-/// If it is zero, then transaction will be submitted every time we see difference between
-/// stored and real conversion rates. If it is large enough (e.g. > than 10 percents, which is 0.1),
-/// then rational relayers may stop relaying messages because they were submitted using
-/// lesser conversion rate.
-pub(crate) const CONVERSION_RATE_ALLOWED_DIFFERENCE_RATIO: f64 = 0.05;
 
 /// Parameters that have the same names across all bridges.
 #[derive(Debug, PartialEq, StructOpt)]
@@ -82,8 +72,6 @@ pub struct HeadersAndMessagesSharedParams {
 	/// Hex-encoded lane identifiers that should be served by the complex relay.
 	#[structopt(long, default_value = "00000000")]
 	pub lane: Vec<HexLaneId>,
-	#[structopt(long, possible_values = RelayerMode::VARIANTS, case_insensitive = true, default_value = "rational")]
-	pub relayer_mode: RelayerMode,
 	/// If passed, only mandatory headers (headers that are changing the GRANDPA authorities set)
 	/// are relayed.
 	#[structopt(long)]
@@ -92,22 +80,26 @@ pub struct HeadersAndMessagesSharedParams {
 	pub prometheus_params: PrometheusParams,
 }
 
+/// Bridge parameters, shared by all bridge types.
 pub struct Full2WayBridgeCommonParams<
-	Left: TransactionSignScheme + CliChain,
-	Right: TransactionSignScheme + CliChain,
+	Left: ChainWithTransactions + CliChain,
+	Right: ChainWithTransactions + CliChain,
 > {
+	/// Shared parameters.
 	pub shared: HeadersAndMessagesSharedParams,
+	/// Parameters of the left chain.
 	pub left: BridgeEndCommonParams<Left>,
+	/// Parameters of the right chain.
 	pub right: BridgeEndCommonParams<Right>,
 
+	/// Common metric parameters.
 	pub metrics_params: MetricsParams,
-	pub left_to_right_metrics: StandaloneMessagesMetrics<Left, Right>,
-	pub right_to_left_metrics: StandaloneMessagesMetrics<Right, Left>,
 }
 
-impl<Left: TransactionSignScheme + CliChain, Right: TransactionSignScheme + CliChain>
+impl<Left: ChainWithTransactions + CliChain, Right: ChainWithTransactions + CliChain>
 	Full2WayBridgeCommonParams<Left, Right>
 {
+	/// Creates new bridge parameters from its components.
 	pub fn new<L2R: MessagesCliBridge<Source = Left, Target = Right>>(
 		shared: HeadersAndMessagesSharedParams,
 		left: BridgeEndCommonParams<Left>,
@@ -116,48 +108,42 @@ impl<Left: TransactionSignScheme + CliChain, Right: TransactionSignScheme + CliC
 		// Create metrics registry.
 		let metrics_params = shared.prometheus_params.clone().into();
 		let metrics_params = relay_utils::relay_metrics(metrics_params).into_params();
-		let left_to_right_metrics = substrate_relay_helper::messages_metrics::standalone_metrics::<
-			L2R::MessagesLane,
-		>(left.client.clone(), right.client.clone())?;
-		let right_to_left_metrics = left_to_right_metrics.clone().reverse();
 
-		Ok(Self {
-			shared,
-			left,
-			right,
-			metrics_params,
-			left_to_right_metrics,
-			right_to_left_metrics,
-		})
+		Ok(Self { shared, left, right, metrics_params })
 	}
 }
 
-pub struct BridgeEndCommonParams<Chain: TransactionSignScheme + CliChain> {
+/// Parameters that are associated with one side of the bridge.
+pub struct BridgeEndCommonParams<Chain: ChainWithTransactions + CliChain> {
+	/// Chain client.
 	pub client: Client<Chain>,
+	/// Transactions signer.
 	pub sign: AccountKeyPairOf<Chain>,
+	/// Transactions mortality.
 	pub transactions_mortality: Option<u32>,
+	/// Account that "owns" messages pallet.
 	pub messages_pallet_owner: Option<AccountKeyPairOf<Chain>>,
+	/// Accounts, which balances are exposed as metrics by the relay process.
 	pub accounts: Vec<TaggedAccount<AccountIdOf<Chain>>>,
 }
 
+/// All data of the bidirectional complex relay.
 struct FullBridge<
 	'a,
-	Source: TransactionSignScheme + CliChain,
-	Target: TransactionSignScheme + CliChain,
+	Source: ChainWithTransactions + CliChain,
+	Target: ChainWithTransactions + CliChain,
 	Bridge: MessagesCliBridge<Source = Source, Target = Target>,
 > {
-	shared: &'a HeadersAndMessagesSharedParams,
 	source: &'a mut BridgeEndCommonParams<Source>,
 	target: &'a mut BridgeEndCommonParams<Target>,
 	metrics_params: &'a MetricsParams,
-	metrics: &'a StandaloneMessagesMetrics<Source, Target>,
 	_phantom_data: PhantomData<Bridge>,
 }
 
 impl<
 		'a,
-		Source: TransactionSignScheme<Chain = Source> + CliChain,
-		Target: TransactionSignScheme<Chain = Target> + CliChain,
+		Source: ChainWithTransactions + CliChain,
+		Target: ChainWithTransactions + CliChain,
 		Bridge: MessagesCliBridge<Source = Source, Target = Target>,
 	> FullBridge<'a, Source, Target, Bridge>
 where
@@ -165,68 +151,22 @@ where
 	AccountIdOf<Target>: From<<AccountKeyPairOf<Target> as Pair>::Public>,
 	BalanceOf<Source>: TryFrom<BalanceOf<Target>> + Into<u128>,
 {
+	/// Construct complex relay given it components.
 	fn new(
-		shared: &'a HeadersAndMessagesSharedParams,
 		source: &'a mut BridgeEndCommonParams<Source>,
 		target: &'a mut BridgeEndCommonParams<Target>,
 		metrics_params: &'a MetricsParams,
-		metrics: &'a StandaloneMessagesMetrics<Source, Target>,
 	) -> Self {
-		Self { shared, source, target, metrics_params, metrics, _phantom_data: Default::default() }
+		Self { source, target, metrics_params, _phantom_data: Default::default() }
 	}
 
-	fn start_conversion_rate_update_loop(&mut self) -> anyhow::Result<()> {
-		if let Some(ref messages_pallet_owner) = self.source.messages_pallet_owner {
-			let format_err = || {
-				anyhow::format_err!(
-					"Cannon run conversion rate updater: {} -> {}",
-					Target::NAME,
-					Source::NAME
-				)
-			};
-			substrate_relay_helper::conversion_rate_update::run_conversion_rate_update_loop::<
-				Bridge::MessagesLane,
-				Source,
-			>(
-				self.source.client.clone(),
-				TransactionParams {
-					signer: messages_pallet_owner.clone(),
-					mortality: self.source.transactions_mortality,
-				},
-				self.metrics
-					.target_to_source_conversion_rate
-					.as_ref()
-					.ok_or_else(format_err)?
-					.shared_value_ref(),
-				self.metrics
-					.target_to_base_conversion_rate
-					.as_ref()
-					.ok_or_else(format_err)?
-					.shared_value_ref(),
-				self.metrics
-					.source_to_base_conversion_rate
-					.as_ref()
-					.ok_or_else(format_err)?
-					.shared_value_ref(),
-				CONVERSION_RATE_ALLOWED_DIFFERENCE_RATIO,
-			);
-			self.source.accounts.push(TaggedAccount::MessagesPalletOwner {
-				id: messages_pallet_owner.public().into(),
-				bridged_chain: Target::NAME.to_string(),
-			});
-		}
-		Ok(())
-	}
-
+	/// Returns message relay parameters.
 	fn messages_relay_params(
 		&self,
 		source_to_target_headers_relay: Arc<dyn OnDemandRelay<BlockNumberOf<Source>>>,
 		target_to_source_headers_relay: Arc<dyn OnDemandRelay<BlockNumberOf<Target>>>,
 		lane_id: LaneId,
 	) -> MessagesRelayParams<Bridge::MessagesLane> {
-		let relayer_mode = self.shared.relayer_mode.into();
-		let relay_strategy = MixStrategy::new(relayer_mode);
-
 		MessagesRelayParams {
 			source_client: self.source.client.clone(),
 			source_transaction_params: TransactionParams {
@@ -242,8 +182,6 @@ where
 			target_to_source_headers_relay: Some(target_to_source_headers_relay),
 			lane_id,
 			metrics_params: self.metrics_params.clone().disable(),
-			standalone_metrics: Some(self.metrics.clone()),
-			relay_strategy,
 		}
 	}
 }
@@ -261,21 +199,28 @@ declare_chain_cli_schema!(RialtoParachainsToMillau, rialto_parachains_to_millau)
 declare_relay_to_relay_bridge_schema!(Millau, Rialto);
 declare_relay_to_parachain_bridge_schema!(Millau, RialtoParachain, Rialto);
 
+/// Base portion of the bidirectional complex relay.
+///
+/// This main purpose of extracting this trait is that in different relays the implementation
+/// of `start_on_demand_headers_relayers` method will be different. But the number of
+/// implementations is limited to relay <> relay, parachain <> relay and parachain <> parachain.
+/// This trait allows us to reuse these implementations in different bridges.
 #[async_trait]
 trait Full2WayBridgeBase: Sized + Send + Sync {
 	/// The CLI params for the bridge.
 	type Params;
 	/// The left relay chain.
-	type Left: TransactionSignScheme<Chain = Self::Left>
-		+ CliChain<KeyPair = AccountKeyPairOf<Self::Left>>;
+	type Left: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Self::Left>>;
 	/// The right destination chain (it can be a relay or a parachain).
-	type Right: TransactionSignScheme<Chain = Self::Right>
-		+ CliChain<KeyPair = AccountKeyPairOf<Self::Right>>;
+	type Right: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Self::Right>>;
 
+	/// Reference to common relay parameters.
 	fn common(&self) -> &Full2WayBridgeCommonParams<Self::Left, Self::Right>;
 
+	/// Mutable reference to common relay parameters.
 	fn mut_common(&mut self) -> &mut Full2WayBridgeCommonParams<Self::Left, Self::Right>;
 
+	/// Start on-demand headers relays.
 	async fn start_on_demand_headers_relayers(
 		&mut self,
 	) -> anyhow::Result<(
@@ -284,6 +229,7 @@ trait Full2WayBridgeBase: Sized + Send + Sync {
 	)>;
 }
 
+/// Bidirectional complex relay.
 #[async_trait]
 trait Full2WayBridge: Sized + Sync
 where
@@ -292,52 +238,53 @@ where
 	BalanceOf<Self::Left>: TryFrom<BalanceOf<Self::Right>> + Into<u128>,
 	BalanceOf<Self::Right>: TryFrom<BalanceOf<Self::Left>> + Into<u128>,
 {
+	/// Base portion of the bidirectional complex relay.
 	type Base: Full2WayBridgeBase<Left = Self::Left, Right = Self::Right>;
 
 	/// The left relay chain.
-	type Left: Chain
+	type Left: ChainWithTransactions
 		+ ChainWithBalances
-		+ TransactionSignScheme<Chain = Self::Left>
 		+ CliChain<KeyPair = AccountKeyPairOf<Self::Left>>;
 	/// The right relay chain.
-	type Right: Chain
+	type Right: ChainWithTransactions
 		+ ChainWithBalances
-		+ TransactionSignScheme<Chain = Self::Right>
 		+ CliChain<KeyPair = AccountKeyPairOf<Self::Right>>;
 
-	// Left to Right bridge
+	/// Left to Right bridge.
 	type L2R: MessagesCliBridge<Source = Self::Left, Target = Self::Right>;
-	// Right to Left bridge
+	/// Right to Left bridge
 	type R2L: MessagesCliBridge<Source = Self::Right, Target = Self::Left>;
 
+	/// Construct new bridge.
 	fn new(params: <Self::Base as Full2WayBridgeBase>::Params) -> anyhow::Result<Self>;
 
+	/// Reference to the base relay portion.
 	fn base(&self) -> &Self::Base;
 
+	/// Mutable reference to the base relay portion.
 	fn mut_base(&mut self) -> &mut Self::Base;
 
+	/// Creates and returns Left to Right complex relay.
 	fn left_to_right(&mut self) -> FullBridge<Self::Left, Self::Right, Self::L2R> {
 		let common = self.mut_base().mut_common();
 		FullBridge::<_, _, Self::L2R>::new(
-			&common.shared,
 			&mut common.left,
 			&mut common.right,
 			&common.metrics_params,
-			&common.left_to_right_metrics,
 		)
 	}
 
+	/// Creates and returns Right to Left complex relay.
 	fn right_to_left(&mut self) -> FullBridge<Self::Right, Self::Left, Self::R2L> {
 		let common = self.mut_base().mut_common();
 		FullBridge::<_, _, Self::R2L>::new(
-			&common.shared,
 			&mut common.right,
 			&mut common.left,
 			&common.metrics_params,
-			&common.right_to_left_metrics,
 		)
 	}
 
+	/// Start complex relay.
 	async fn run(&mut self) -> anyhow::Result<()> {
 		// Register standalone metrics.
 		{
@@ -351,10 +298,6 @@ where
 				bridged_chain: Self::Left::NAME.to_string(),
 			});
 		}
-
-		// start conversion rate update loops for left/right chains
-		self.left_to_right().start_conversion_rate_update_loop()?;
-		self.right_to_left().start_conversion_rate_update_loop()?;
 
 		// start on-demand header relays
 		let (left_to_right_on_demand_headers, right_to_left_on_demand_headers) =
@@ -415,6 +358,7 @@ where
 	}
 }
 
+/// Millau <> Rialto complex relay.
 pub struct MillauRialtoFull2WayBridge {
 	base: <Self as Full2WayBridge>::Base,
 }
@@ -440,6 +384,7 @@ impl Full2WayBridge for MillauRialtoFull2WayBridge {
 	}
 }
 
+/// Millau <> RialtoParachain complex relay.
 pub struct MillauRialtoParachainFull2WayBridge {
 	base: <Self as Full2WayBridge>::Base,
 }
@@ -465,10 +410,12 @@ impl Full2WayBridge for MillauRialtoParachainFull2WayBridge {
 	}
 }
 
-/// Start headers+messages relayer process.
+/// Complex headers+messages relay.
 #[derive(Debug, PartialEq, StructOpt)]
 pub enum RelayHeadersAndMessages {
+	/// Millau <> Rialto relay.
 	MillauRialto(MillauRialtoHeadersAndMessages),
+	/// Millau <> RialtoParachain relay.
 	MillauRialtoParachain(MillauRialtoParachainHeadersAndMessages),
 }
 
@@ -533,7 +480,6 @@ mod tests {
 						HexLaneId([0x00, 0x00, 0x00, 0x00]),
 						HexLaneId([0x73, 0x77, 0x61, 0x70])
 					],
-					relayer_mode: RelayerMode::Rational,
 					only_mandatory_headers: false,
 					prometheus_params: PrometheusParams {
 						no_prometheus: false,
@@ -646,7 +592,6 @@ mod tests {
 				MillauRialtoParachainHeadersAndMessages {
 					shared: HeadersAndMessagesSharedParams {
 						lane: vec![HexLaneId([0x00, 0x00, 0x00, 0x00])],
-						relayer_mode: RelayerMode::Rational,
 						only_mandatory_headers: false,
 						prometheus_params: PrometheusParams {
 							no_prometheus: false,

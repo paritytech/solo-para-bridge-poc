@@ -20,7 +20,7 @@ use crate::weights::WeightInfo;
 
 use bp_messages::{MessageNonce, UnrewardedRelayersState};
 use bp_runtime::{PreComputedSize, Size};
-use frame_support::weights::{RuntimeDbWeight, Weight};
+use frame_support::weights::Weight;
 
 /// Size of the message being delivered in benchmarks.
 pub const EXPECTED_DEFAULT_MESSAGE_LENGTH: u32 = 128;
@@ -35,82 +35,16 @@ const SIGNED_EXTENSIONS_SIZE: u32 = 1024;
 pub const EXTRA_STORAGE_PROOF_SIZE: u32 = 1024;
 
 /// Ensure that weights from `WeightInfoExt` implementation are looking correct.
-pub fn ensure_weights_are_correct<W: WeightInfoExt>(
-	expected_default_message_delivery_tx_weight: Weight,
-	expected_additional_byte_delivery_weight: Weight,
-	expected_messages_delivery_confirmation_tx_weight: Weight,
-	expected_pay_inbound_dispatch_fee_weight: Weight,
-	db_weight: RuntimeDbWeight,
-) {
-	// verify `send_message` weight components
-	assert_ne!(W::send_message_overhead(), 0);
-	assert_ne!(W::send_message_size_overhead(0), 0);
-
+pub fn ensure_weights_are_correct<W: WeightInfoExt>() {
 	// verify `receive_messages_proof` weight components
-	assert_ne!(W::receive_messages_proof_overhead(), 0);
-	assert_ne!(W::receive_messages_proof_messages_overhead(1), 0);
-	assert_ne!(W::receive_messages_proof_outbound_lane_state_overhead(), 0);
-	assert_ne!(W::storage_proof_size_overhead(1), 0);
-
-	// verify that the hardcoded value covers `receive_messages_proof` weight
-	let actual_single_regular_message_delivery_tx_weight = W::receive_messages_proof_weight(
-		&PreComputedSize(
-			(EXPECTED_DEFAULT_MESSAGE_LENGTH + W::expected_extra_storage_proof_size()) as usize,
-		),
-		1,
-		0,
-	);
-	assert!(
-		actual_single_regular_message_delivery_tx_weight <=
-			expected_default_message_delivery_tx_weight,
-		"Default message delivery transaction weight {} is larger than expected weight {}",
-		actual_single_regular_message_delivery_tx_weight,
-		expected_default_message_delivery_tx_weight,
-	);
-
-	// verify that hardcoded value covers additional byte length of `receive_messages_proof` weight
-	let actual_additional_byte_delivery_weight = W::storage_proof_size_overhead(1);
-	assert!(
-		actual_additional_byte_delivery_weight <= expected_additional_byte_delivery_weight,
-		"Single additional byte delivery weight {} is larger than expected weight {}",
-		actual_additional_byte_delivery_weight,
-		expected_additional_byte_delivery_weight,
-	);
+	assert_ne!(W::receive_messages_proof_overhead(), Weight::zero());
+	assert_ne!(W::receive_messages_proof_messages_overhead(1), Weight::zero());
+	assert_ne!(W::receive_messages_proof_outbound_lane_state_overhead(), Weight::zero());
+	assert_ne!(W::storage_proof_size_overhead(1), Weight::zero());
 
 	// verify `receive_messages_delivery_proof` weight components
-	assert_ne!(W::receive_messages_delivery_proof_overhead(), 0);
-	assert_ne!(W::storage_proof_size_overhead(1), 0);
-
-	// `receive_messages_delivery_proof_messages_overhead` and
-	// `receive_messages_delivery_proof_relayers_overhead` may return zero if rewards are not paid
-	// during confirmations delivery, so we're not checking it here
-
-	// verify that the hardcoded value covers `receive_messages_delivery_proof` weight
-	let actual_messages_delivery_confirmation_tx_weight = W::receive_messages_delivery_proof_weight(
-		&PreComputedSize(W::expected_extra_storage_proof_size() as usize),
-		&UnrewardedRelayersState {
-			unrewarded_relayer_entries: 1,
-			total_messages: 1,
-			..Default::default()
-		},
-		db_weight,
-	);
-	assert!(
-		actual_messages_delivery_confirmation_tx_weight <=
-			expected_messages_delivery_confirmation_tx_weight,
-		"Messages delivery confirmation transaction weight {} is larger than expected weight {}",
-		actual_messages_delivery_confirmation_tx_weight,
-		expected_messages_delivery_confirmation_tx_weight,
-	);
-
-	// verify pay-dispatch-fee overhead for inbound messages
-	let actual_pay_inbound_dispatch_fee_weight = W::pay_inbound_dispatch_fee_overhead();
-	assert!(
-		actual_pay_inbound_dispatch_fee_weight <= expected_pay_inbound_dispatch_fee_weight,
-		"Weight {} of pay-dispatch-fee overhead for inbound messages is larger than expected weight {}",
-		actual_pay_inbound_dispatch_fee_weight,
-		expected_pay_inbound_dispatch_fee_weight,
-	);
+	assert_ne!(W::receive_messages_delivery_proof_overhead(), Weight::zero());
+	assert_ne!(W::storage_proof_size_overhead(1), Weight::zero());
 }
 
 /// Ensure that we're able to receive maximal (by-size and by-weight) message from other chain.
@@ -140,7 +74,7 @@ pub fn ensure_able_to_receive_message<W: WeightInfoExt>(
 		max_incoming_message_dispatch_weight,
 	);
 	assert!(
-		max_delivery_transaction_dispatch_weight <= max_extrinsic_weight,
+		max_delivery_transaction_dispatch_weight.all_lte(max_extrinsic_weight),
 		"Weight of maximal message delivery transaction + {} is larger than maximal possible transaction weight {}",
 		max_delivery_transaction_dispatch_weight,
 		max_extrinsic_weight,
@@ -154,7 +88,6 @@ pub fn ensure_able_to_receive_confirmation<W: WeightInfoExt>(
 	max_inbound_lane_data_proof_size_from_peer_chain: u32,
 	max_unrewarded_relayer_entries_at_peer_inbound_lane: MessageNonce,
 	max_unconfirmed_messages_at_inbound_lane: MessageNonce,
-	db_weight: RuntimeDbWeight,
 ) {
 	// verify that we're able to receive confirmation of maximal-size
 	let max_confirmation_transaction_size =
@@ -176,10 +109,9 @@ pub fn ensure_able_to_receive_confirmation<W: WeightInfoExt>(
 			total_messages: max_unconfirmed_messages_at_inbound_lane,
 			..Default::default()
 		},
-		db_weight,
 	);
 	assert!(
-		max_confirmation_transaction_dispatch_weight <= max_extrinsic_weight,
+		max_confirmation_transaction_dispatch_weight.all_lte(max_extrinsic_weight),
 		"Weight of maximal confirmation transaction {} is larger than maximal possible transaction weight {}",
 		max_confirmation_transaction_dispatch_weight,
 		max_extrinsic_weight,
@@ -197,17 +129,6 @@ pub trait WeightInfoExt: WeightInfo {
 	fn expected_extra_storage_proof_size() -> u32;
 
 	// Functions that are directly mapped to extrinsics weights.
-
-	/// Weight of message send extrinsic.
-	fn send_message_weight(message: &impl Size, db_weight: RuntimeDbWeight) -> Weight {
-		let transaction_overhead = Self::send_message_overhead();
-		let message_size_overhead = Self::send_message_size_overhead(message.size());
-		let call_back_overhead = Self::single_message_callback_overhead(db_weight);
-
-		transaction_overhead
-			.saturating_add(message_size_overhead)
-			.saturating_add(call_back_overhead)
-	}
 
 	/// Weight of message delivery extrinsic.
 	fn receive_messages_proof_weight(
@@ -243,7 +164,6 @@ pub trait WeightInfoExt: WeightInfo {
 	fn receive_messages_delivery_proof_weight(
 		proof: &impl Size,
 		relayers_state: &UnrewardedRelayersState,
-		db_weight: RuntimeDbWeight,
 	) -> Weight {
 		// basic components of extrinsic weight
 		let transaction_overhead = Self::receive_messages_delivery_proof_overhead();
@@ -260,34 +180,13 @@ pub trait WeightInfoExt: WeightInfo {
 			actual_proof_size.saturating_sub(expected_proof_size),
 		);
 
-		// and cost of calling `OnDeliveryConfirmed::on_messages_delivered()` for every confirmed
-		// message
-		let callback_overhead = relayers_state
-			.total_messages
-			.saturating_mul(Self::single_message_callback_overhead(db_weight));
-
 		transaction_overhead
 			.saturating_add(messages_overhead)
 			.saturating_add(relayers_overhead)
 			.saturating_add(proof_size_overhead)
-			.saturating_add(callback_overhead)
 	}
 
 	// Functions that are used by extrinsics weights formulas.
-
-	/// Returns weight of message send transaction (`send_message`).
-	fn send_message_overhead() -> Weight {
-		Self::send_minimal_message_worst_case()
-	}
-
-	/// Returns weight that needs to be accounted when message of given size is sent
-	/// (`send_message`).
-	fn send_message_size_overhead(message_size: u32) -> Weight {
-		let message_size_in_kb = (1024u64 + message_size as u64) / 1024;
-		let single_kb_weight =
-			(Self::send_16_kb_message_worst_case() - Self::send_1_kb_message_worst_case()) / 15;
-		message_size_in_kb * single_kb_weight
-	}
 
 	/// Returns weight overhead of message delivery transaction (`receive_messages_proof`).
 	fn receive_messages_proof_overhead() -> Weight {
@@ -305,7 +204,7 @@ pub trait WeightInfoExt: WeightInfo {
 		let weight_of_single_message_and_single_tx_overhead = Self::receive_single_message_proof();
 		weight_of_two_messages_and_single_tx_overhead
 			.saturating_sub(weight_of_single_message_and_single_tx_overhead)
-			.saturating_mul(messages as Weight)
+			.saturating_mul(messages as _)
 	}
 
 	/// Returns weight that needs to be accounted when message delivery transaction
@@ -336,7 +235,7 @@ pub trait WeightInfoExt: WeightInfo {
 		let weight_of_single_message = Self::receive_delivery_proof_for_single_message();
 		weight_of_two_messages
 			.saturating_sub(weight_of_single_message)
-			.saturating_mul(messages as Weight)
+			.saturating_mul(messages as _)
 	}
 
 	/// Returns weight that needs to be accounted when receiving confirmations for given a number of
@@ -348,7 +247,7 @@ pub trait WeightInfoExt: WeightInfo {
 			Self::receive_delivery_proof_for_two_messages_by_single_relayer();
 		weight_of_two_messages_by_two_relayers
 			.saturating_sub(weight_of_two_messages_by_single_relayer)
-			.saturating_mul(relayers as Weight)
+			.saturating_mul(relayers as _)
 	}
 
 	/// Returns weight that needs to be accounted when storage proof of given size is received
@@ -360,7 +259,7 @@ pub trait WeightInfoExt: WeightInfo {
 	/// relayer must pay when it relays proof of given size (even if cost based on other parameters
 	/// is less than that cost).
 	fn storage_proof_size_overhead(proof_size: u32) -> Weight {
-		let proof_size_in_bytes = proof_size as Weight;
+		let proof_size_in_bytes = proof_size;
 		let byte_weight = (Self::receive_single_message_proof_16_kb() -
 			Self::receive_single_message_proof_1_kb()) /
 			(15 * 1024);
@@ -375,15 +274,6 @@ pub trait WeightInfoExt: WeightInfo {
 		Self::receive_single_message_proof()
 			.saturating_sub(Self::receive_single_prepaid_message_proof())
 	}
-
-	/// Returns pre-dispatch weight of single callback call.
-	///
-	/// When benchmarking the weight please take into consideration both the `OnMessageAccepted` and
-	/// `OnDeliveryConfirmed` callbacks. The method should return the greater of the two, because
-	/// it's used to estimate the weight in both contexts.
-	fn single_message_callback_overhead(db_weight: RuntimeDbWeight) -> Weight {
-		db_weight.reads_writes(1, 1)
-	}
 }
 
 impl WeightInfoExt for () {
@@ -392,7 +282,7 @@ impl WeightInfoExt for () {
 	}
 }
 
-impl<T: frame_system::Config> WeightInfoExt for crate::weights::MillauWeight<T> {
+impl<T: frame_system::Config> WeightInfoExt for crate::weights::BridgeWeight<T> {
 	fn expected_extra_storage_proof_size() -> u32 {
 		EXTRA_STORAGE_PROOF_SIZE
 	}
