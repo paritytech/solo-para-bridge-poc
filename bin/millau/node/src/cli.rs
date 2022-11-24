@@ -18,7 +18,7 @@ use clap::Parser;
 // use sc_cli::RunCmd;
 use std::fmt;
 
-#[derive(clap::ArgEnum, Copy, Debug, Clone, PartialEq)]
+#[derive(clap::ValueEnum, Copy, Debug, Clone, PartialEq)]
 pub enum NodeProcessingRole {
 	LogicProvider,
 	None,
