@@ -15,7 +15,47 @@
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
 use clap::Parser;
-use sc_cli::RunCmd;
+// use sc_cli::RunCmd;
+use std::fmt;
+
+#[derive(clap::ValueEnum, Copy, Debug, Clone, PartialEq)]
+pub enum NodeProcessingRole {
+	LogicProvider,
+	None,
+}
+
+impl fmt::Display for NodeProcessingRole {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self)
+	}
+}
+
+impl std::str::FromStr for NodeProcessingRole {
+	type Err = String;
+	fn from_str(s: &str) -> Result<Self, String> {
+		if s.eq_ignore_ascii_case("logic-provider") {
+			Ok(Self::LogicProvider)
+		} else if s.eq_ignore_ascii_case("none") {
+			Ok(Self::None)
+		} else {
+			Err("Unknown string variant given for node-processing-role cli flag. Valid values are (logic-provider/none)".into())
+		}
+	}
+}
+
+#[derive(Debug, clap::Parser)]
+pub struct RunCmd {
+	#[clap(flatten)]
+	pub base: sc_cli::RunCmd,
+
+	/// Run node as aggregator or logic provider.
+	#[clap(long, value_enum, default_value_t = NodeProcessingRole::None)]
+	pub node_processing_role: NodeProcessingRole,
+
+	/// Set offchain config
+	#[clap(long, value_enum)]
+	pub set_config: Option<String>,
+}
 
 #[derive(Debug, Parser)]
 pub struct Cli {

@@ -1,0 +1,36 @@
+[package]
+name = "offchain-plugin"
+version = "0.2.0"
+description = "A module that contains the off-chain logic & communicates the results to the pallet(s)"
+authors = ["Parity Technologies <admin@parity.io>"]
+homepage = "https://parity.io/"
+license = "Unlicense"
+publish = false
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+futures = "0.3.16"
+tokio = { version = "1.15", features = ["time", "macros"] }
+tokio-stream = "0.1"
+serde_json = "1.0.81"
+
+sc-client-db = { version = "0.10.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sc-client-api = { version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sc-keystore = { version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-keystore = { version = "0.12.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-database = { version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-api = { version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-runtime = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-application-crypto = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-core = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-io = { version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false, features = ["derive", "full", "bit-vec"]  }
+rand = { version = "0.8.4"}
+primitives = { version = "0.2.0", path = "../primitives/primitives" }
+runtime-api = { version = "0.2.0", path = "../primitives/runtime-api" }
+
+[dev-dependencies]
+kvdb-memorydb = "0.12.0"

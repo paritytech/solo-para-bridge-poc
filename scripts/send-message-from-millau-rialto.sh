@@ -8,12 +8,12 @@
 
 # TODO: Fix demeo scripts https://github.com/paritytech/parity-bridges-common/issues/1406
 
-MILLAU_PORT="${RIALTO_PORT:-9945}"
+MILLAU_PORT="${MILLAU_PORT:-9944}"
 
 case "$1" in
 	remark)
 		RUST_LOG=runtime=trace,substrate-relay=trace,bridge=trace \
-		./target/debug/substrate-relay send-message millau-to-rialto \
+		./target/release/substrate-relay send-message millau-to-rialto-parachain \
 			--source-host localhost \
 			--source-port $MILLAU_PORT \
 			--source-signer //Alice \
@@ -21,7 +21,7 @@ case "$1" in
 		;;
 	transfer)
 		RUST_LOG=runtime=trace,substrate-relay=trace,bridge=trace \
-		./target/debug/substrate-relay send-message millau-to-rialto \
+		./target/release/substrate-relay send-message millau-to-rialto-parachain \
 			--source-host localhost \
 			--source-port $MILLAU_PORT \
 			--source-signer //Alice \

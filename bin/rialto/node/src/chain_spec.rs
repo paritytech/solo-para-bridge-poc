@@ -28,6 +28,7 @@ use sp_consensus_babe::AuthorityId as BabeId;
 use sp_core::{sr25519, Pair, Public};
 use sp_finality_grandpa::AuthorityId as GrandpaId;
 use sp_runtime::traits::{IdentifyAccount, Verify};
+use std::path::PathBuf;
 
 /// "Names" of the authorities accounts at local testnet.
 const LOCAL_AUTHORITIES_ACCOUNTS: [&str; 5] = ["Alice", "Bob", "Charlie", "Dave", "Eve"];
@@ -53,6 +54,7 @@ pub enum Alternative {
 	Development,
 	/// Whatever the current runtime is, with simple Alice/Bob/Charlie/Dave/Eve auths.
 	LocalTestnet,
+	File(PathBuf),
 }
 
 /// Helper function to generate a crypto pair from seed
@@ -144,6 +146,7 @@ impl Alternative {
 				properties,
 				Default::default(),
 			),
+			Alternative::File(path) => ChainSpec::from_json_file(path).unwrap(),
 		}
 	}
 }
@@ -278,7 +281,7 @@ fn testnet_genesis(
 		},
 		paras: Default::default(),
 		bridge_millau_messages: BridgeMillauMessagesConfig {
-			owner: Some(get_account_id_from_seed::<sr25519::Public>(MILLAU_MESSAGES_PALLET_OWNER)),
+			owner: Some(get_account_id_from_seed::<sr25519::Public>(SUDO_ACCOUNT)),
 			..Default::default()
 		},
 		xcm_pallet: Default::default(),

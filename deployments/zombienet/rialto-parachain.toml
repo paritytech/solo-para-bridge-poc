@@ -1,0 +1,24 @@
+[relaychain]
+default_command = "./target/release/rialto-bridge-node"
+
+chain = "local"
+
+[[relaychain.nodes]]
+name = "alice"
+validator = true
+
+[[relaychain.nodes]]
+name = "bob"
+validator = true
+
+[[relaychain.nodes]]
+name = "charlie"
+validator = true
+
+[[parachains]]
+id = 2000
+cumulus_based = true
+
+[parachains.collator]
+name = "collator01"
+command = "RUST_LOG=runtime=trace,xcm=trace ./target/release/rialto-parachain-collator"

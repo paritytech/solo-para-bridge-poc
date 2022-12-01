@@ -18,7 +18,7 @@
 
 use jsonrpsee::RpcModule;
 use millau_runtime::{self, opaque::Block, RuntimeApi};
-use sc_client_api::BlockBackend;
+use sc_client_api::{Backend, BlockBackend};
 use sc_consensus_aura::{CompatibilityMode, ImportQueueParams, SlotProportion, StartAuraParams};
 pub use sc_executor::NativeElseWasmExecutor;
 use sc_finality_grandpa::SharedVoterState;
@@ -28,6 +28,10 @@ use sc_telemetry::{Telemetry, TelemetryWorker};
 use sp_consensus_aura::sr25519::AuthorityPair as AuraPair;
 use std::{sync::Arc, time::Duration};
 
+use tokio::sync::Mutex;
+
+use crate::cli::NodeProcessingRole;
+use offchain_plugin::config::offchain_config::set_offchain_config;
 // Our native executor instance.
 pub struct ExecutorDispatch;
 
@@ -182,7 +186,11 @@ fn remote_keystore(_url: &str) -> Result<Arc<LocalKeystore>, &'static str> {
 }
 
 /// Builds a new service for a full client.
-pub fn new_full(mut config: Configuration) -> Result<TaskManager, ServiceError> {
+pub fn new_full(
+	mut config: Configuration,
+	processing_role: NodeProcessingRole,
+	set_config: Option<String>,
+) -> Result<TaskManager, ServiceError> {
 	let sc_service::PartialComponents {
 		client,
 		backend,
@@ -395,9 +403,9 @@ pub fn new_full(mut config: Configuration) -> Result<TaskManager, ServiceError> 
 	let payload_provider = beefy_primitives::mmr::MmrRootProvider::new(client.clone());
 	let beefy_params = beefy_gadget::BeefyParams {
 		client: client.clone(),
-		backend,
+		backend: backend.clone(),
 		payload_provider,
-		runtime: client,
+		runtime: client.clone(),
 		key_store: keystore.clone(),
 		network_params: beefy_gadget::BeefyNetworkParams {
 			network: network.clone(),
@@ -454,6 +462,37 @@ pub fn new_full(mut config: Configuration) -> Result<TaskManager, ServiceError> 
 			None,
 			sc_finality_grandpa::run_grandpa_voter(grandpa_config)?,
 		);
+	}
+
+	// start client if processing role is logic provider
+	if processing_role == NodeProcessingRole::LogicProvider {
+		let offchain_db = backend
+			.offchain_storage()
+			.ok_or(ServiceError::Other(String::from("Offchain storage unavailable")))?;
+		let keystore =
+			keystore_container.local_keystore().ok_or(sc_keystore::Error::Unavailable)?;
+
+		// Clone per thread where we plan on continually sharing read/writes
+		let shared_db = Arc::new(Mutex::new(offchain_db.clone()));
+
+		// set configuration to offchain storage
+		if let Some(config) = set_config {
+			set_offchain_config(offchain_db, config).map_err(|_| {
+				ServiceError::Other(String::from("Could not initialize offchain config"))
+			})?;
+		}
+
+		// Start client service
+		let offchain_plugin_task =
+			offchain_plugin::start(client.clone(), shared_db.clone(), keystore.clone());
+		let offchain_state_poll =
+			offchain_plugin::poll_reveal_window_state(shared_db, client, keystore);
+
+		let group_name = "plugin";
+		task_manager
+			.spawn_handle()
+			.spawn("tx_submission", group_name, offchain_plugin_task);
+		task_manager.spawn_handle().spawn("state_poll", group_name, offchain_state_poll);
 	}
 
 	network_starter.start_network();

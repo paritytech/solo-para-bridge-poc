@@ -77,7 +77,7 @@ pub use pallet_xcm::Call as XcmCall;
 
 // Polkadot & XCM imports
 use bridge_runtime_common::CustomNetworkId;
-use pallet_xcm::XcmPassthrough;
+use pallet_xcm::{EnsureXcm, XcmPassthrough};
 use polkadot_parachain::primitives::Sibling;
 use xcm::latest::prelude::*;
 use xcm_builder::{
@@ -150,9 +150,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 ///
 /// Change this to adjust the block time.
 pub const MILLISECS_PER_BLOCK: u64 = 12000;
-
 pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;
-
 pub const EPOCH_DURATION_IN_BLOCKS: u32 = 10 * MINUTES;
 
 // Time is measured by number of blocks.
@@ -194,9 +192,9 @@ impl frame_system::Config for Runtime {
 	/// The index type for blocks.
 	type BlockNumber = BlockNumber;
 	/// The type for hashing blocks and tries.
-	type Hash = Hash;
+	type Hash = sp_core::H256;
 	/// The hashing algorithm used.
-	type Hashing = Hashing;
+	type Hashing = sp_runtime::traits::BlakeTwo256;
 	/// The header type.
 	type Header = generic::Header<BlockNumber, Hashing>;
 	/// The ubiquitous event type.
@@ -586,6 +584,29 @@ impl pallet_bridge_messages::Config<WithMillauMessagesInstance> for Runtime {
 	type BridgedChainId = BridgedChainId;
 }
 
+match_types! {
+	pub type ChildSoloDLEChain: impl Contains<MultiLocation> = {
+		MultiLocation { parents: 1,
+		// Expect any bridge. This might be fine for now, but may need thought later
+		interior: X1(GlobalConsensus(_)) }
+	};
+}
+
+impl pallet_x_chain::Config<pallet_x_chain::Instance1> for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type SharedStateAccess = MillauSharedState;
+	type CrossChainOrigin = EnsureXcm<ChildSoloDLEChain>;
+}
+
+parameter_types! {
+	/// Set the max state length to be 2KiB.
+	pub const MaxStateLength: u32 = 2048;
+}
+
+impl pallet_shared_state::Config<pallet_shared_state::Instance1> for Runtime {
+	type MaxStateLength = MaxStateLength;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime where
@@ -617,6 +638,9 @@ construct_runtime!(
 		BridgeRelayers: pallet_bridge_relayers::{Pallet, Call, Storage, Event<T>},
 		BridgeMillauGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage},
 		BridgeMillauMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>},
+
+		MillauSharedState: pallet_shared_state::<Instance1>::{Pallet, Storage},
+		XChain: pallet_x_chain::<Instance1>::{Pallet, Call, Storage, Event<T>} = 200
 	}
 );
 
@@ -877,7 +901,15 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let location: MultiLocation =
 				(Parent, X1(GlobalConsensus(MillauNetwork::get()))).into();
-			let xcm: Xcm<RuntimeCall> = vec![Instruction::Trap(42)].into();
+			let xcm: Xcm<Call> = vec![Instruction::Transact {
+				origin_kind: OriginKind::Xcm,
+				require_weight_at_most: 0,
+				call: pallet_x_chain::Call::placeholder::<Runtime> { int_one: 1, int_two: 2 }
+					.encode()
+					.into(),
+			}]
+			.into();
+			// let xcm: Xcm<RuntimeCall> = vec![Instruction::Trap(42)].into();
 
 			let mut incoming_message = DispatchMessage {
 				key: MessageKey { lane_id: [0, 0, 0, 0], nonce: 1 },

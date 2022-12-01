@@ -1,0 +1,69 @@
+[package]
+name = "pallet-logic-provider"
+version = "0.2.0"
+description = "FRAME pallet for receiving, processing and storing offchain data"
+authors = ["Parity Technologies <admin@parity.io>"]
+homepage = "https://parity.io/"
+license = "Unlicense"
+publish = false
+edition = "2021"
+
+[dependencies]
+codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false, features = [
+	"derive",
+] }
+scale-info = { version = "2.0.1", default-features = false, features = ["derive"] }
+frame-support = { default-features = false, version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32"}
+frame-system = { default-features = false, version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+frame-benchmarking = { default-features = false, version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32", optional = true }
+log = "0.4"
+sp-core = { default-features = false, version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-std = { default-features = false, version = "4.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+itertools = { version = "0.10.3", default-features = false, features = ["use_alloc"] }
+sp-runtime = { default-features = false, version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+sp-io = { default-features = false, version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+num-rational = { version = "0.4.0", default-features = false }
+bridge-runtime-common = { path = "../../../runtime-common", default-features = false }
+
+#  xcm
+pallet-xcm = { git = "https://github.com/paritytech/polkadot", branch = "gav-xcm-v3", default-features = false }
+xcm = { git = "https://github.com/paritytech/polkadot", branch = "gav-xcm-v3", default-features = false }
+xcm-builder = { git = "https://github.com/paritytech/polkadot", branch = "gav-xcm-v3", default-features = false }
+xcm-executor = { git = "https://github.com/paritytech/polkadot", branch = "gav-xcm-v3", default-features = false }
+
+# For benchmarking
+hex-literal = { version = "0.3.4" }
+
+# local
+primitives = { version = "0.2.0", default-features = false, path = "../../primitives/primitives" }
+pallet-commitments = { version = "0.1.0", path = "../commitments", default-features = false }
+
+[dev-dependencies]
+sp-io = { default-features = false, version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+# Use sp-core in both [dependencies] and [dev-dependencies], but with different features
+sp-core = { default-features = false, version = "6.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32", features = ["full_crypto"] }
+pallet-balances = { default-features = false, version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32"}
+sp-api = { version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.32" }
+rand = { version = "0.8.4" }
+
+[features]
+default = ["std"]
+std = [
+	"codec/std",
+	"scale-info/std",
+	"frame-support/std",
+	"frame-system/std",
+	"frame-benchmarking/std",
+	"sp-core/std",
+	"sp-std/std",
+	"sp-runtime/std",
+	"pallet-balances/std",
+	"itertools/use_std",
+	"num-rational/std",
+	"itertools/use_std",
+	"pallet-commitments/std",
+	"primitives/std",
+]
+
+runtime-benchmarks = ["frame-benchmarking/runtime-benchmarks"]
+try-runtime = ["frame-support/try-runtime"]
