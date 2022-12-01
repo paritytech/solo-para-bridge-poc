@@ -54,6 +54,14 @@ sp-timestamp = { git = "https://github.com/paritytech/substrate", branch = "mast
 substrate-frame-rpc-system = { git = "https://github.com/paritytech/substrate", branch = "master" }
 sc-network-common = { git = "https://github.com/paritytech/substrate", branch = "master" }
 
+tokio = { version = "1.15", features = ["time"] }
+tokio-stream = "0.1"
+
+# Local Dependencies
+offchain-plugin = { version = "0.2.0", path = "../offchain-plugin" }
+runtime-api = { version = "0.2.0", path = "../primitives/runtime-api" }
+pallet-logic-provider = { version = "0.2.0", path = "../pallets/logic-provider" }
+
 [build-dependencies]
 substrate-build-script-utils = { git = "https://github.com/paritytech/substrate", branch = "master" }
 frame-benchmarking-cli = { git = "https://github.com/paritytech/substrate", branch = "master" }

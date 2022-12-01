@@ -19,7 +19,7 @@ use millau_runtime::{
 	AccountId, AuraConfig, BalancesConfig, BeefyConfig, BridgeRialtoMessagesConfig,
 	BridgeRialtoParachainMessagesConfig, BridgeWestendGrandpaConfig, GrandpaConfig,
 	RuntimeGenesisConfig, SessionConfig, SessionKeys, Signature, SudoConfig, SystemConfig,
-	WASM_BINARY,
+	WASM_BINARY, CouncilConfig,
 };
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_beefy::crypto::AuthorityId as BeefyId;
@@ -239,5 +239,13 @@ fn testnet_genesis(
 			..Default::default()
 		},
 		xcm_pallet: Default::default(),
+		council: CouncilConfig {
+			phantom: Default::default(),
+			members: vec![
+				get_account_id_from_seed::<sr25519::Public>("Alice"),
+				get_account_id_from_seed::<sr25519::Public>("Bob"),
+				get_account_id_from_seed::<sr25519::Public>("Charlie"),
+			],
+		},
 	}
 }

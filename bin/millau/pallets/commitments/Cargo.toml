@@ -1,0 +1,42 @@
+[package]
+name = "pallet-commitments"
+version = "0.1.0"
+description = "FRAME pallet for building commit-reveal schemes"
+authors = ["Parity Technologies <admin@parity.io>"]
+homepage = "https://parity.io/"
+license = "Unlicense"
+publish = false
+edition = "2021"
+
+[dependencies]
+codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false, features = [
+	"derive",
+] }
+scale-info = { version = "2.0.1", default-features = false, features = ["derive"] }
+frame-support = { default-features = false, version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "master" }
+frame-system = { default-features = false, version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "master" }
+sp-std = { default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "master" }
+sp-runtime = { default-features = false,  git = "https://github.com/paritytech/substrate.git", branch = "master" }
+sp-io = { default-features = false,  git = "https://github.com/paritytech/substrate.git", branch = "master" }
+sp-core = { default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "master" }
+
+log = "0.4.19"
+[dev-dependencies]
+pallet-balances = { default-features = false, version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "master" }
+sp-api = { version = "4.0.0-dev", git = "https://github.com/paritytech/substrate.git", branch = "master" }
+rand = { version = "0.8.4" }
+sp-core = { git = "https://github.com/paritytech/substrate.git", branch = "master" }
+
+[features]
+default = ["std"]
+std = [
+	"codec/std",
+	"scale-info/std",
+	"frame-support/std",
+	"frame-system/std",
+	"sp-std/std",
+	"sp-runtime/std",
+	"pallet-balances/std",
+	"sp-core/std"
+]
+try-runtime = ["frame-support/try-runtime"]

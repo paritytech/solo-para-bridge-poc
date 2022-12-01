@@ -33,14 +33,19 @@ pub mod rialto_parachain_messages;
 pub mod weights;
 pub mod xcm_config;
 
+use crate::xcm_config::XcmRouter;
+
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 #[cfg(feature = "runtime-benchmarks")]
 use bp_relayers::{RewardsAccountOwner, RewardsAccountParams};
+use bp_rialto_parachain::RIALTO_PARACHAIN_ID;
 use bp_runtime::HeaderId;
+use frame_system::{pallet_prelude::OriginFor, EnsureRoot};
 use pallet_grandpa::{
 	fg_primitives, AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList,
 };
 use pallet_transaction_payment::{FeeDetails, Multiplier, RuntimeDispatchInfo};
+use primitives::shared::MapToCall;
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_beefy::{crypto::AuthorityId as BeefyId, mmr::MmrLeafVersion, ValidatorSet};
@@ -51,11 +56,14 @@ use sp_runtime::{
 	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult, FixedPointNumber, Perquintill,
 };
+
+use bridge_runtime_common::CustomNetworkId;
+use xcm::latest::prelude::*;
+
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
-
 // to be able to use Millau runtime in `bridge-runtime-common` tests
 pub use bridge_runtime_common;
 
@@ -81,6 +89,7 @@ pub use pallet_bridge_messages::Call as MessagesCall;
 pub use pallet_bridge_parachains::Call as BridgeParachainsCall;
 pub use pallet_sudo::Call as SudoCall;
 pub use pallet_timestamp::Call as TimestampCall;
+pub use pallet_x_chain::Call as XChainCall;
 pub use pallet_xcm::Call as XcmCall;
 
 use bridge_runtime_common::{
@@ -115,6 +124,7 @@ pub type Balance = bp_millau::Balance;
 pub type Nonce = bp_millau::Nonce;
 
 /// A hash of some data used by the chain.
+// pub type Hash = primitives::shared::Hash;
 pub type Hash = bp_millau::Hash;
 
 /// Hashing algorithm used by the chain.
@@ -188,7 +198,8 @@ impl frame_system::Config for Runtime {
 	/// The type for hashing blocks and tries.
 	type Hash = Hash;
 	/// The hashing algorithm used.
-	type Hashing = Hashing;
+	// type Hashing = Hashing;
+	type Hashing = sp_runtime::traits::BlakeTwo256;
 	/// The header type.
 	type Block = Block;
 	/// The ubiquitous event type.
@@ -525,6 +536,119 @@ impl pallet_utility::Config for Runtime {
 	type WeightInfo = ();
 }
 
+// Logic Provider parameter types.
+parameter_types! {
+	/// The reward that is allocated for one metadata.
+	pub const Reward: u64 = 1_000_000_000_000_000;
+	pub const FundsToLock: u64 = 500_000_000_000;
+	pub const EnforceBurningTokens: bool = false;
+	/// The number of blocks during which the participants are still
+	/// able to provide solutions **after** enough
+	/// submissions are gathered.
+	pub const BlocksPerRound: u8 = 1;
+	pub const MaxCallPayloadLength: u16 =  325;
+}
+
+impl pallet_logic_provider::TemplateBridgedXcm<Runtime> for BridgeRialtoMessages {
+	fn send_transact(
+		_origin: OriginFor<Runtime>,
+		proof: Vec<u8>,
+		_delivery_and_dispatch_fee: u64,
+	) -> Result<([u8; 32], xcm::v3::MultiAssets), xcm::v3::SendError> {
+		use codec::Encode;
+		const EXTRINSIC_INDEX: u8 = 0;
+		// Construct the call. First, prepend the pallet index and the extrinsic index,
+		// then add encoded params to that byte vector.
+		let encoded_hardcoded_call: Vec<u8> =
+			[vec![TARGET_X_CHAIN_PALLET_INDEX, EXTRINSIC_INDEX], proof.encode()].concat();
+
+		// Send Transact call - tell other chain to dispatch *some* call. Is accepted and delivered
+		// to the other chain.
+		let xcm: Xcm<()> = vec![Instruction::Transact {
+			origin_kind: OriginKind::Xcm,
+			// max weight of call
+			require_weight_at_most: 100000,
+			call: encoded_hardcoded_call.into(),
+		}]
+		.into();
+
+		let dest = (
+			Parent,
+			X2(
+				GlobalConsensus(CustomNetworkId::Rialto.as_network_id()),
+				Parachain(RIALTO_PARACHAIN_ID),
+			),
+		);
+		send_xcm::<XcmRouter>(dest.into(), xcm)
+	}
+}
+
+// How many participants can there be within the network
+#[cfg(feature = "runtime-benchmarks")]
+parameter_types! {
+	pub const MaxParticipants: u32 = 1024;
+}
+
+#[cfg(not(feature = "runtime-benchmarks"))]
+parameter_types! {
+	pub const MaxParticipants: u32 = 1;
+}
+
+/// Configure the logic-provider in pallets/logic-provider.
+
+/// **NOTE**: this configuration is intended only for local development.
+/// It must be changed when running it as a parachain or in production mode.
+impl pallet_logic_provider::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type MaxCallPayloadLength = MaxCallPayloadLength;
+	type EnforceBurningTokens = EnforceBurningTokens;
+	type Reward = Reward;
+	type FundsToLock = FundsToLock;
+	type ForceOrigin = EnsureRoot<AccountId>;
+	type WeightInfo = pallet_logic_provider::SubstrateWeight<Self>;
+	type LocalCurrency = Balances;
+
+	type Bridging = BridgeRialtoMessages;
+}
+
+impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extrinsic = UncheckedExtrinsic;
+	type OverarchingCall = RuntimeCall;
+}
+
+parameter_types! {
+	pub const RevealWindowLength:u8 = 5;
+}
+
+impl pallet_commitments::Config for Runtime {
+	type RevealWindowLength = RevealWindowLength;
+	type MaxParticipants = MaxParticipants;
+	type Hash = Hash;
+}
+
+parameter_types! {
+	pub const CouncilMotionDuration: BlockNumber = 5 * bp_millau::DAYS;
+	pub const CouncilMaxProposals: u32 = 100;
+	pub const CouncilMaxMembers: u32 = 100;
+}
+
+type CouncilCollective = pallet_collective::Instance1;
+impl pallet_collective::Config<CouncilCollective> for Runtime {
+	type RuntimeOrigin = RuntimeOrigin;
+	type Proposal = RuntimeCall;
+	type RuntimeEvent = RuntimeEvent;
+	type MotionDuration = CouncilMotionDuration;
+	type MaxProposals = CouncilMaxProposals;
+	type MaxMembers = CouncilMaxMembers;
+	type DefaultVote = pallet_collective::PrimeDefaultVote;
+	type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
+}
+
+const TARGET_X_CHAIN_PALLET_INDEX: u8 = 200;
+
 construct_runtime!(
 	pub enum Runtime {
 		System: frame_system::{Pallet, Call, Config<T>, Storage, Event<T>},
@@ -563,6 +687,11 @@ construct_runtime!(
 
 		// Pallet for sending XCM.
 		XcmPallet: pallet_xcm::{Pallet, Call, Storage, Event<T>, Origin, Config<T>} = 99,
+
+		// Include the custom logic from the logic-provider in the runtime.
+		LogicProvider: pallet_logic_provider::{Pallet, Call, Storage, Event<T>, ValidateUnsigned},
+		Council: pallet_collective::<Instance1>,
+		Commitments: pallet_commitments,
 	}
 );
 
@@ -639,6 +768,28 @@ mod benches {
 }
 
 impl_runtime_apis! {
+	impl runtime_api::ConstructExtrinsicApi<Block> for Runtime {
+		fn submit_unchecked_extrinsic(
+			mapped_call: Vec<u8>,
+			signature: primitives::shared::Signature,
+			public: primitives::shared::Public,
+		) -> Result<(), ()> {
+			let decoded_call = MapToCall::decode(&mut &mapped_call[..]).map_err(|_| ())?;
+			match decoded_call {
+				MapToCall::LogicProviderCall(_) =>
+					LogicProvider::create_extrinsic_from_external_call(mapped_call, public, signature),
+			}
+		}
+	}
+
+	impl runtime_api::StorageQueryApi<Block> for Runtime {
+		fn get_reveal_window(
+			metadata_id: primitives::shared::MetadataId,
+		) -> Option<(BlockNumber, BlockNumber)> {
+			Commitments::get_reveal_window(metadata_id)
+		}
+	}
+
 	impl sp_api::Core<Block> for Runtime {
 		fn version() -> RuntimeVersion {
 			VERSION

@@ -1,0 +1,17 @@
+{
+    "participantId": "i2hbk35kh35",
+    "submissionTimestamp": "26-05-2020 15:36:18",
+    "metadatas": [
+        {
+            "nmi": "kj2kh3b452k3h4",
+            "intervals": [
+                {
+                    "activePowerExportLimit": 6,
+                    "activePowerImportLimit": 8,
+                    "diEndtime": "20-04-2022 22:13:24",
+                    "diStarttime": "28-11-2019 17:27:54"
+                }
+            ]
+        }
+    ]
+  }
