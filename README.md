@@ -1,16 +1,16 @@
 # Solo-Para Bridge PoC
 
 ## Overview
-This repository is based on the `Parity Bridges Common` [repository](https://github.com/paritytech/parity-bridges-common) for a spike/POC on bridging.
+This repository is based on the `Parity Bridges Common` [repository](https://github.com/paritytech/parity-bridges-common) for a spike/POC on bridging between a solo chain and a parachain.
 
 Here is the list of major changes on top of Parity Bridges Common:
 
-- `./bin/millau` contains some additional on-chain and off-chain functionality:
+- `./bin/millau` is the solo chain and contains some additional on-chain and off-chain functionality:
   - Off-chain is responsible for retrieving some off-chain data and submitting it to the on-chain for further processing.
   - After getting off-chain data, on-chain will do computation based on the business logic, and then send the final result to parachain.
   - For more info please have a look at the millau's [readme](bin/millau/README.md).
-- `./bin/rialto-parachain` contains a pallet which is responsible for storing the data received from the solo-chain.
-- Add XCM bridging example to the runtimes/pallets
+- `./bin/rialto-parachain` is the parachain and contains a pallet which is responsible for storing the data received from the solo-chain.
+- Add XCM bridging example to the runtimes/pallets.
 
 ## Some notes on running
 
