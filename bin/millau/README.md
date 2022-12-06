@@ -1,9 +1,9 @@
-# Metadata Devnet 🔌✉️
+# Solo-chain Devnet 🔌✉️
 
-A devnet that will serve as an initial testbed for code targeting the Metadata parachain. The parachain serves to:
+A solo-chain devnet that will serve as an initial testbed for code targeting the Metadata. This solo-chain serves to:
 1. Retrieve metadata
-2. House a client-side module that contains logic to partition the metadata JSON data into parts, and create a merkle tree of that data.
-3. Send a root hash of the data into the runtime via custom runtime api, finalize the expected hash, and store it.
+2. House a client-side module that contains logic to create a hash from the JSON metadata.
+3. Send a hash of the data into the runtime via custom runtime api, finalize the expected hash, and store it.
 
 ## Upgrades
 > ⚠️ **Before making changes**: Be aware of the considerations for upgrading this node. See [runtime-upgrades](docs/runtime-upgrades.md)
@@ -39,7 +39,7 @@ The insertKey() expects three inputs to be provided:
 3. publicKey: value of the public key
 ```
 Like this:
-![Public Key](docs/key_mgmt.png)
+![Public Key](../../docs/key_mgmt.png)
 
 ### Offchain Configuration
 The node expects some offchain configurations as well which needs to be inserted through (offchain->localStorageSet) RPC call.
@@ -72,7 +72,7 @@ The offchain plugin retrieves some offchain data, in the form of a local JSON fi
 This part of the module is meant to exemplify the config's use in supplying business logic configuration.
 One required value is the location of the local JSON file. This is passed into the config in the
 `local_file_path` key. So to run the logic provider node locally, one must set this key. To do so:
-1. As part of the necessary offchain config setup, provide the `local_file_path` key (see [`Offchain Configuration`](#Offchain Configuration) above).
+1. As part of the necessary offchain config setup, provide the `local_file_path` key (see `Offchain Configuration` above).
 2. Now, for the `local_file_path` key, set the value as the path to the local JSON file. Currently: `offchain-plugin/mock/metadatas.json`.
 
 
@@ -85,7 +85,7 @@ RPC call, and the value will be updated some time after. You can check the relat
 [here](offchain-plugin/src/config/config_provider.rs).
 
 Like this:
-![Offchain Config](docs/offchain_config.png)
+![Offchain Config](../../docs/offchain_config.png)
 
 ### Using Nix
 
@@ -96,7 +96,7 @@ lorri `lorri shell`.
 
 ### Rust Setup
 
-First, complete the [basic Rust setup instructions](./docs/rust-setup.md).
+First, complete the [basic Rust setup instructions](../../docs/rust-setup.md).
 
 ### Run
 

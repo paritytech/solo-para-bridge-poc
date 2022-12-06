@@ -11,7 +11,7 @@ The purpose of the hash is to represent the input of the Logic Provider pallet, 
 ### Start Runtime Interface Service
 The service should execute some long-running task, which retrieves offchain data. The example module shows one way to do this with a tokio interval:
 ```rust
-	let interval = tokio::time::interval(Duration::from_secs(10));
+	let interval = tokio::time::interval(Duration::from_secs(27));
 	tokio_stream::wrappers::IntervalStream::new(interval)
 		.for_each(|now| {
             // for each interval "tick", perform some business logic
