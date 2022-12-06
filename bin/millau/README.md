@@ -1,6 +1,6 @@
 # Solo-chain Devnet 🔌✉️
 
-A solo-chain devnet that will serve as an initial testbed for code targeting the Metadata. This solo-chain serves to:
+A solo-chain devnet that will serve as an initial testbed for code processing file metadata. This solo-chain serves to:
 1. Retrieve metadata
 2. House a client-side module that contains logic to create a hash from the JSON metadata.
 3. Send a hash of the data into the runtime via custom runtime api, finalize the expected hash, and store it.
