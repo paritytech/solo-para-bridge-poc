@@ -13,7 +13,7 @@ pub mod pallet {
 	use frame_support::{pallet_prelude::*, PalletError};
 	use sp_core::H256;
 
-	use sp_runtime::traits::{CheckEqual, MaybeDisplay, MaybeMallocSizeOf, SimpleBitOps};
+	use sp_runtime::traits::{CheckEqual, MaybeDisplay, SimpleBitOps};
 
 	use sp_std::{fmt::Debug, prelude::*};
 
@@ -42,7 +42,6 @@ pub mod pallet {
 			+ sp_std::hash::Hash
 			+ AsRef<[u8]>
 			+ AsMut<[u8]>
-			+ MaybeMallocSizeOf
 			+ MaxEncodedLen;
 	}
 

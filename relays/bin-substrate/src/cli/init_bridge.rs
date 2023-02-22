@@ -15,6 +15,7 @@
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
 use async_trait::async_trait;
+use codec::Encode;
 
 use crate::{
 	chains::{
@@ -28,7 +29,7 @@ use crate::{
 	cli::{bridge::CliBridgeBase, chain_schema::*},
 };
 use bp_runtime::Chain as ChainBase;
-use relay_substrate_client::{AccountKeyPairOf, Chain, SignParam, UnsignedTransaction};
+use relay_substrate_client::{AccountKeyPairOf, Chain, UnsignedTransaction};
 use sp_core::Pair;
 use structopt::StructOpt;
 use strum::{EnumString, EnumVariantNames, VariantNames};
@@ -46,6 +47,9 @@ pub struct InitBridge {
 	target: TargetConnectionParams,
 	#[structopt(flatten)]
 	target_sign: TargetSigningParams,
+	/// Generates all required data, but does not submit extrinsic
+	#[structopt(long)]
+	dry_run: bool,
 }
 
 #[derive(Debug, EnumString, EnumVariantNames)]
@@ -77,24 +81,22 @@ where
 		let source_client = data.source.into_client::<Self::Source>().await?;
 		let target_client = data.target.into_client::<Self::Target>().await?;
 		let target_sign = data.target_sign.to_keypair::<Self::Target>()?;
+		let dry_run = data.dry_run;
 
-		let (spec_version, transaction_version) = target_client.simple_runtime_version().await?;
 		substrate_relay_helper::finality::initialize::initialize::<Self::Engine, _, _, _>(
 			source_client,
 			target_client.clone(),
-			target_sign.public().into(),
-			SignParam {
-				spec_version,
-				transaction_version,
-				genesis_hash: *target_client.genesis_hash(),
-				signer: target_sign,
-			},
+			target_sign,
 			move |transaction_nonce, initialization_data| {
-				Ok(UnsignedTransaction::new(
-					Self::encode_init_bridge(initialization_data).into(),
-					transaction_nonce,
-				))
+				let call = Self::encode_init_bridge(initialization_data);
+				log::info!(
+					target: "bridge",
+					"Initialize bridge call encoded as hex string: {:?}",
+					format!("0x{}", hex::encode(call.encode()))
+				);
+				Ok(UnsignedTransaction::new(call.into(), transaction_nonce))
 			},
+			dry_run,
 		)
 		.await;
 
@@ -121,13 +123,14 @@ impl BridgeInitializer for MillauToRialtoParachainCliBridge {
 	fn encode_init_bridge(
 		init_data: <Self::Engine as Engine<Self::Source>>::InitializationData,
 	) -> <Self::Target as Chain>::Call {
-		let initialize_call = rialto_parachain_runtime::BridgeGrandpaCall::<
-			rialto_parachain_runtime::Runtime,
-			rialto_parachain_runtime::MillauGrandpaInstance,
-		>::initialize {
-			init_data,
-		};
-		rialto_parachain_runtime::SudoCall::sudo { call: Box::new(initialize_call.into()) }.into()
+		type RuntimeCall = relay_rialto_parachain_client::RuntimeCall;
+		type BridgeGrandpaCall = relay_rialto_parachain_client::BridgeGrandpaCall;
+		type SudoCall = relay_rialto_parachain_client::SudoCall;
+
+		let initialize_call =
+			RuntimeCall::BridgeMillauGrandpa(BridgeGrandpaCall::initialize { init_data });
+
+		RuntimeCall::Sudo(SudoCall::sudo { call: Box::new(initialize_call) })
 	}
 }
 
@@ -174,7 +177,9 @@ impl BridgeInitializer for RococoToBridgeHubWococoCliBridge {
 		init_data: <Self::Engine as Engine<Self::Source>>::InitializationData,
 	) -> <Self::Target as Chain>::Call {
 		relay_bridge_hub_wococo_client::runtime::Call::BridgeRococoGrandpa(
-			relay_bridge_hub_wococo_client::runtime::BridgeGrandpaRococoCall::initialize(init_data),
+			relay_bridge_hub_wococo_client::runtime::BridgeRococoGrandpaCall::initialize {
+				init_data,
+			},
 		)
 	}
 }
@@ -186,7 +191,9 @@ impl BridgeInitializer for WococoToBridgeHubRococoCliBridge {
 		init_data: <Self::Engine as Engine<Self::Source>>::InitializationData,
 	) -> <Self::Target as Chain>::Call {
 		relay_bridge_hub_rococo_client::runtime::Call::BridgeWococoGrandpa(
-			relay_bridge_hub_rococo_client::runtime::BridgeWococoGrandpaCall::initialize(init_data),
+			relay_bridge_hub_rococo_client::runtime::BridgeWococoGrandpaCall::initialize {
+				init_data,
+			},
 		)
 	}
 }

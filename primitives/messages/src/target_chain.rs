@@ -16,13 +16,13 @@
 
 //! Primitives of messages module, that are used on the target chain.
 
-use crate::{LaneId, Message, MessageKey, MessagePayload, OutboundLaneData};
+use crate::{LaneId, Message, MessageKey, MessageNonce, MessagePayload, OutboundLaneData};
 
 use bp_runtime::{messages::MessageDispatchResult, Size};
 use codec::{Decode, Encode, Error as CodecError};
 use frame_support::{weights::Weight, Parameter, RuntimeDebug};
 use scale_info::TypeInfo;
-use sp_std::{collections::btree_map::BTreeMap, fmt::Debug, prelude::*};
+use sp_std::{collections::btree_map::BTreeMap, fmt::Debug, marker::PhantomData, prelude::*};
 
 /// Proved messages from the source chain.
 pub type ProvedMessages<Message> = BTreeMap<LaneId, ProvedLaneMessages<Message>>;
@@ -89,6 +89,9 @@ pub trait MessageDispatch<AccountId> {
 	/// (opaque `MessagePayload` used in delivery and this `DispatchPayload` used in dispatch).
 	type DispatchPayload: Decode;
 
+	/// Fine-grained result of single message dispatch (for better diagnostic purposes)
+	type DispatchLevelResult: Clone + sp_std::fmt::Debug + Eq;
+
 	/// Estimate dispatch weight.
 	///
 	/// This function must return correct upper bound of dispatch weight. The return value
@@ -106,7 +109,26 @@ pub trait MessageDispatch<AccountId> {
 	fn dispatch(
 		relayer_account: &AccountId,
 		message: DispatchMessage<Self::DispatchPayload>,
-	) -> MessageDispatchResult;
+	) -> MessageDispatchResult<Self::DispatchLevelResult>;
+}
+
+/// Manages payments that are happening at the target chain during message delivery transaction.
+pub trait DeliveryPayments<AccountId> {
+	/// Error type.
+	type Error: Debug + Into<&'static str>;
+
+	/// Pay rewards for delivering messages to the given relayer.
+	///
+	/// This method is called during message delivery transaction which has been submitted
+	/// by the `relayer`. The transaction brings `total_messages` messages  but only
+	/// `valid_messages` have been accepted. The post-dispatch transaction weight is the
+	/// `actual_weight`.
+	fn pay_reward(
+		relayer: AccountId,
+		total_messages: MessageNonce,
+		valid_messages: MessageNonce,
+		actual_weight: Weight,
+	);
 }
 
 impl<Message> Default for ProvedLaneMessages<Message> {
@@ -127,17 +149,34 @@ impl<DispatchPayload: Decode> From<MessagePayload> for DispatchMessageData<Dispa
 	}
 }
 
+impl<AccountId> DeliveryPayments<AccountId> for () {
+	type Error = &'static str;
+
+	fn pay_reward(
+		_relayer: AccountId,
+		_total_messages: MessageNonce,
+		_valid_messages: MessageNonce,
+		_actual_weight: Weight,
+	) {
+		// this implementation is not rewarding relayer at all
+	}
+}
+
 /// Structure that may be used in place of `SourceHeaderChain` and `MessageDispatch` on chains,
 /// where inbound messages are forbidden.
-pub struct ForbidInboundMessages;
+pub struct ForbidInboundMessages<MessagesProof, DispatchPayload>(
+	PhantomData<(MessagesProof, DispatchPayload)>,
+);
 
 /// Error message that is used in `ForbidOutboundMessages` implementation.
 const ALL_INBOUND_MESSAGES_REJECTED: &str =
 	"This chain is configured to reject all inbound messages";
 
-impl SourceHeaderChain for ForbidInboundMessages {
+impl<MessagesProof: Parameter + Size, DispatchPayload> SourceHeaderChain
+	for ForbidInboundMessages<MessagesProof, DispatchPayload>
+{
 	type Error = &'static str;
-	type MessagesProof = ();
+	type MessagesProof = MessagesProof;
 
 	fn verify_messages_proof(
 		_proof: Self::MessagesProof,
@@ -147,18 +186,20 @@ impl SourceHeaderChain for ForbidInboundMessages {
 	}
 }
 
-impl<AccountId> MessageDispatch<AccountId> for ForbidInboundMessages {
-	type DispatchPayload = ();
+impl<MessagesProof, DispatchPayload: Decode, AccountId> MessageDispatch<AccountId>
+	for ForbidInboundMessages<MessagesProof, DispatchPayload>
+{
+	type DispatchPayload = DispatchPayload;
+	type DispatchLevelResult = ();
 
 	fn dispatch_weight(_message: &mut DispatchMessage<Self::DispatchPayload>) -> Weight {
 		Weight::MAX
 	}
 
-	fn dispatch(_: &AccountId, _: DispatchMessage<Self::DispatchPayload>) -> MessageDispatchResult {
-		MessageDispatchResult {
-			dispatch_result: false,
-			unspent_weight: Weight::zero(),
-			dispatch_fee_paid_during_dispatch: false,
-		}
+	fn dispatch(
+		_: &AccountId,
+		_: DispatchMessage<Self::DispatchPayload>,
+	) -> MessageDispatchResult<Self::DispatchLevelResult> {
+		MessageDispatchResult { unspent_weight: Weight::zero(), dispatch_level_result: () }
 	}
 }

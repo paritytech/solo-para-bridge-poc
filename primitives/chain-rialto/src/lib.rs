@@ -18,13 +18,14 @@
 // RuntimeApi generated functions
 #![allow(clippy::too_many_arguments)]
 
+use bp_header_chain::ChainWithGrandpa;
 use bp_messages::{
 	InboundMessageDetails, LaneId, MessageNonce, MessagePayload, OutboundMessageDetails,
 };
 use bp_runtime::{decl_bridge_runtime_apis, Chain};
 use frame_support::{
 	dispatch::DispatchClass,
-	weights::{constants::WEIGHT_PER_SECOND, IdentityFee, Weight},
+	weights::{constants::WEIGHT_REF_TIME_PER_SECOND, IdentityFee, Weight},
 	RuntimeDebug,
 };
 use frame_system::limits;
@@ -48,8 +49,10 @@ pub const TX_EXTRA_BYTES: u32 = 104;
 /// Maximal weight of single Rialto block.
 ///
 /// This represents two seconds of compute assuming a target block time of six seconds.
-// TODO: https://github.com/paritytech/parity-bridges-common/issues/1543 - remove `set_proof_size`
-pub const MAXIMUM_BLOCK_WEIGHT: Weight = WEIGHT_PER_SECOND.set_proof_size(1_000).saturating_mul(2);
+///
+/// Max PoV size is set to max value, since it isn't important for relay/standalone chains.
+pub const MAXIMUM_BLOCK_WEIGHT: Weight =
+	Weight::from_parts(WEIGHT_REF_TIME_PER_SECOND.saturating_mul(2), u64::MAX);
 
 /// Represents the portion of a block that will be used by Normal extrinsics.
 pub const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -70,11 +73,33 @@ pub const SESSION_LENGTH: BlockNumber = 4;
 /// Maximal number of GRANDPA authorities at Rialto.
 pub const MAX_AUTHORITIES_COUNT: u32 = 5;
 
-/// Maximal SCALE-encoded header size (in bytes) at Rialto.
-pub const MAX_HEADER_SIZE: u32 = 1024;
+/// Reasonable number of headers in the `votes_ancestries` on Rialto chain.
+///
+/// See [`bp_header_chain::ChainWithGrandpa`] for more details.
+pub const REASONABLE_HEADERS_IN_JUSTIFICATON_ANCESTRY: u32 = 8;
 
-/// Maximal SCALE-encoded size of parachains headers that are stored at Rialto `Paras` pallet.
-pub const MAX_NESTED_PARACHAIN_HEAD_SIZE: u32 = MAX_HEADER_SIZE;
+/// Approximate average header size in `votes_ancestries` field of justification on Rialto chain.
+///
+/// See [`bp_header_chain::ChainWithGrandpa`] for more details.
+pub const AVERAGE_HEADER_SIZE_IN_JUSTIFICATION: u32 = 256;
+
+/// Approximate maximal header size on Rialto chain.
+///
+/// We expect maximal header to have digest item with the new authorities set for every consensus
+/// engine (GRANDPA, Babe, BEEFY, ...) - so we multiply it by 3. And also
+/// `AVERAGE_HEADER_SIZE_IN_JUSTIFICATION` bytes for other stuff.
+///
+/// See [`bp_header_chain::ChainWithGrandpa`] for more details.
+pub const MAX_HEADER_SIZE: u32 = MAX_AUTHORITIES_COUNT
+	.saturating_mul(3)
+	.saturating_add(AVERAGE_HEADER_SIZE_IN_JUSTIFICATION);
+
+/// Maximal size of encoded `bp_parachains::ParaStoredHeaderData` structure among all Rialto
+/// parachains.
+///
+/// It includes the block number and state root, so it shall be near 40 bytes, but let's have some
+/// reserve.
+pub const MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE: u32 = 128;
 
 /// Re-export `time_units` to make usage easier.
 pub use time_units::*;
@@ -155,6 +180,15 @@ impl Chain for Rialto {
 			.max_extrinsic
 			.unwrap_or(Weight::MAX)
 	}
+}
+
+impl ChainWithGrandpa for Rialto {
+	const WITH_CHAIN_GRANDPA_PALLET_NAME: &'static str = WITH_RIALTO_GRANDPA_PALLET_NAME;
+	const MAX_AUTHORITIES_COUNT: u32 = MAX_AUTHORITIES_COUNT;
+	const REASONABLE_HEADERS_IN_JUSTIFICATON_ANCESTRY: u32 =
+		REASONABLE_HEADERS_IN_JUSTIFICATON_ANCESTRY;
+	const MAX_HEADER_SIZE: u32 = MAX_HEADER_SIZE;
+	const AVERAGE_HEADER_SIZE_IN_JUSTIFICATION: u32 = AVERAGE_HEADER_SIZE_IN_JUSTIFICATION;
 }
 
 frame_support::parameter_types! {

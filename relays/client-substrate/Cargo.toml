@@ -9,18 +9,20 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 async-std = { version = "1.6.5", features = ["attributes"] }
 async-trait = "0.1"
 codec = { package = "parity-scale-codec", version = "3.1.5" }
-futures = "0.3.7"
+futures = "0.3.26"
 jsonrpsee = { version = "0.15", features = ["macros", "ws-client"] }
 log = "0.4.17"
 num-traits = "0.2"
 rand = "0.7"
-tokio = { version = "1.8", features = ["rt-multi-thread"] }
+scale-info = { version = "2.1.1", features = ["derive"] }
+tokio = { version = "1.25", features = ["rt-multi-thread"] }
 thiserror = "1.0.26"
 
 # Bridge dependencies
 
 bp-header-chain = { path = "../../primitives/header-chain" }
 bp-messages = { path = "../../primitives/messages" }
+bp-polkadot-core = { path = "../../primitives/polkadot-core" }
 bp-runtime = { path = "../../primitives/runtime" }
 pallet-bridge-messages = { path = "../../modules/messages" }
 finality-relay = { path = "../finality" }
@@ -28,21 +30,25 @@ relay-utils = { path = "../utils" }
 
 # Substrate Dependencies
 
-frame-support = { git = "https://github.com/paritytech/substrate", branch = "master" }
-frame-system = { git = "https://github.com/paritytech/substrate", branch = "master" }
-pallet-balances = { git = "https://github.com/paritytech/substrate", branch = "master" }
-pallet-transaction-payment = { git = "https://github.com/paritytech/substrate", branch = "master" }
-pallet-transaction-payment-rpc-runtime-api = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sc-chain-spec = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sc-rpc-api = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sc-transaction-pool-api = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-finality-grandpa = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-rpc = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-storage = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-trie = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-version = { git = "https://github.com/paritytech/substrate", branch = "master" }
+frame-support = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+frame-system = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+pallet-balances = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+pallet-transaction-payment = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+pallet-transaction-payment-rpc-runtime-api = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+pallet-utility = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sc-chain-spec = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sc-rpc-api = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sc-transaction-pool-api = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-core = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-rpc = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-std = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-trie = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-version = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+
+# Polkadot Dependencies
+
+xcm = { git = "https://github.com/paritytech/polkadot", branch = "release-v0.9.38", default-features = false }
 
 [features]
 default = []

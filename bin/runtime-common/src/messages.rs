@@ -20,19 +20,25 @@
 //! pallet is used to dispatch incoming messages. Message identified by a tuple
 //! of to elements - message lane id and message nonce.
 
+pub use bp_runtime::{UnderlyingChainOf, UnderlyingChainProvider};
+
 use bp_header_chain::{HeaderChain, HeaderChainError};
 use bp_messages::{
-	source_chain::LaneMessageVerifier,
-	target_chain::{DispatchMessage, MessageDispatch, ProvedLaneMessages, ProvedMessages},
+	source_chain::{LaneMessageVerifier, TargetHeaderChain},
+	target_chain::{
+		DispatchMessage, MessageDispatch, ProvedLaneMessages, ProvedMessages, SourceHeaderChain,
+	},
 	InboundLaneData, LaneId, Message, MessageKey, MessageNonce, MessagePayload, OutboundLaneData,
 };
-use bp_runtime::{messages::MessageDispatchResult, Chain, ChainId, Size, StorageProofChecker};
+use bp_runtime::{
+	messages::MessageDispatchResult, Chain, ChainId, RawStorageProof, Size, StorageProofChecker,
+	StorageProofError,
+};
 use codec::{Decode, DecodeLimit, Encode};
 use frame_support::{traits::Get, weights::Weight, RuntimeDebug};
 use hash_db::Hasher;
 use scale_info::TypeInfo;
 use sp_std::{convert::TryFrom, fmt::Debug, marker::PhantomData, vec::Vec};
-use sp_trie::StorageProof;
 use xcm::latest::prelude::*;
 
 /// Bidirectional message bridge.
@@ -52,12 +58,6 @@ pub trait MessageBridge {
 	type BridgedChain: BridgedChainWithMessages;
 	/// Bridged header chain.
 	type BridgedHeaderChain: HeaderChain<UnderlyingChainOf<Self::BridgedChain>>;
-}
-
-/// A trait that provides the type of the underlying chain.
-pub trait UnderlyingChainProvider {
-	/// Underlying chain type.
-	type Chain: Chain;
 }
 
 /// This chain that has `pallet-bridge-messages` module.
@@ -87,8 +87,6 @@ pub trait BridgedChainWithMessages: UnderlyingChainProvider {
 pub type ThisChain<B> = <B as MessageBridge>::ThisChain;
 /// Bridged chain in context of message bridge.
 pub type BridgedChain<B> = <B as MessageBridge>::BridgedChain;
-/// Underlying chain type.
-pub type UnderlyingChainOf<C> = <C as UnderlyingChainProvider>::Chain;
 /// Hash used on the chain.
 pub type HashOf<C> = bp_runtime::HashOf<<C as UnderlyingChainProvider>::Chain>;
 /// Hasher used on the chain.
@@ -101,9 +99,6 @@ pub type BalanceOf<C> = bp_runtime::BalanceOf<UnderlyingChainOf<C>>;
 pub type OriginOf<C> = <C as ThisChainWithMessages>::RuntimeOrigin;
 /// Type of call that is used on this chain.
 pub type CallOf<C> = <C as ThisChainWithMessages>::RuntimeCall;
-
-/// Raw storage proof type (just raw trie nodes).
-pub type RawStorageProof = Vec<Vec<u8>>;
 
 /// Sub-module that is declaring types required for processing This -> Bridged chain messages.
 pub mod source {
@@ -168,13 +163,13 @@ pub mod source {
 	#[derive(RuntimeDebug)]
 	pub struct FromThisChainMessageVerifier<B>(PhantomData<B>);
 
-	/// The error message returned from LaneMessageVerifier when outbound lane is disabled.
+	/// The error message returned from `LaneMessageVerifier` when outbound lane is disabled.
 	pub const MESSAGE_REJECTED_BY_OUTBOUND_LANE: &str =
 		"The outbound message lane has rejected the message.";
-	/// The error message returned from LaneMessageVerifier when too many pending messages at the
+	/// The error message returned from `LaneMessageVerifier` when too many pending messages at the
 	/// lane.
 	pub const TOO_MANY_PENDING_MESSAGES: &str = "Too many pending messages at the lane.";
-	/// The error message returned from LaneMessageVerifier when call origin is mismatch.
+	/// The error message returned from `LaneMessageVerifier` when call origin is mismatch.
 	pub const BAD_ORIGIN: &str = "Unable to match the source origin to expected target origin.";
 
 	impl<B> LaneMessageVerifier<OriginOf<ThisChain<B>>, FromThisChainMessagePayload>
@@ -219,6 +214,26 @@ pub mod source {
 		)
 	}
 
+	/// `TargetHeaderChain` implementation that is using default types and perform default checks.
+	pub struct TargetHeaderChainAdapter<B>(PhantomData<B>);
+
+	impl<B: MessageBridge> TargetHeaderChain<FromThisChainMessagePayload, AccountIdOf<ThisChain<B>>>
+		for TargetHeaderChainAdapter<B>
+	{
+		type Error = &'static str;
+		type MessagesDeliveryProof = FromBridgedChainMessagesDeliveryProof<HashOf<BridgedChain<B>>>;
+
+		fn verify_message(payload: &FromThisChainMessagePayload) -> Result<(), Self::Error> {
+			verify_chain_message::<B>(payload)
+		}
+
+		fn verify_messages_delivery_proof(
+			proof: Self::MessagesDeliveryProof,
+		) -> Result<(LaneId, InboundLaneData<AccountIdOf<ThisChain<B>>>), Self::Error> {
+			verify_messages_delivery_proof::<B>(proof)
+		}
+	}
+
 	/// Do basic Bridged-chain specific verification of This -> Bridged chain message.
 	///
 	/// Ok result from this function means that the delivery transaction with this message
@@ -259,8 +274,8 @@ pub mod source {
 			proof;
 		B::BridgedHeaderChain::parse_finalized_storage_proof(
 			bridged_header_hash,
-			StorageProof::new(storage_proof),
-			|storage| {
+			storage_proof,
+			|mut storage| {
 				// Messages delivery proof is just proof of single storage key read => any error
 				// is fatal.
 				let storage_inbound_lane_data_key =
@@ -274,6 +289,11 @@ pub mod source {
 					.ok_or("Inbound lane state is missing from the messages proof")?;
 				let inbound_lane_data = InboundLaneData::decode(&mut &raw_inbound_lane_data[..])
 					.map_err(|_| "Failed to decode inbound lane state from the proof")?;
+
+				// check that the storage proof doesn't have any untouched trie nodes
+				storage
+					.ensure_no_unused_nodes()
+					.map_err(|_| "Messages delivery proof has unused trie nodes")?;
 
 				Ok((lane, inbound_lane_data))
 			},
@@ -449,6 +469,7 @@ pub mod target {
 		WeightCredit: Get<Weight>,
 	{
 		type DispatchPayload = FromBridgedChainMessagePayload<CallOf<ThisChain<B>>>;
+		type DispatchLevelResult = ();
 
 		fn dispatch_weight(
 			message: &mut DispatchMessage<Self::DispatchPayload>,
@@ -458,7 +479,7 @@ pub mod target {
 					// I have no idea why this method takes `&mut` reference and there's nothing
 					// about that in documentation. Hope it'll only mutate iff error is returned.
 					let weight = XcmWeigher::weight(&mut payload.xcm.1);
-					let weight = Weight::from_ref_time(weight.unwrap_or_else(|e| {
+					let weight = weight.unwrap_or_else(|e| {
 						log::debug!(
 							target: "runtime::bridge-dispatch",
 							"Failed to compute dispatch weight of incoming XCM message {:?}/{}: {:?}",
@@ -469,8 +490,8 @@ pub mod target {
 
 						// we shall return 0 and then the XCM executor will fail to execute XCM
 						// if we'll return something else (e.g. maximal value), the lane may stuck
-						0
-					}));
+						Weight::zero()
+					});
 
 					payload.weight = Some(weight);
 					weight
@@ -482,7 +503,7 @@ pub mod target {
 		fn dispatch(
 			_relayer_account: &AccountIdOf<ThisChain<B>>,
 			message: DispatchMessage<Self::DispatchPayload>,
-		) -> MessageDispatchResult {
+		) -> MessageDispatchResult<Self::DispatchLevelResult> {
 			let message_id = (message.key.lane_id, message.key.nonce);
 			let do_dispatch = move || -> sp_std::result::Result<Outcome, codec::Error> {
 				let FromBridgedChainMessagePayload { xcm: (location, xcm), weight: weight_limit } =
@@ -504,24 +525,44 @@ pub mod target {
 					location,
 					xcm,
 					hash,
-					weight_limit.unwrap_or_else(Weight::zero).ref_time(),
-					weight_credit.ref_time(),
+					weight_limit.unwrap_or_else(Weight::zero),
+					weight_credit,
 				);
 				Ok(xcm_outcome)
 			};
 
 			let xcm_outcome = do_dispatch();
-			log::trace!(
-				target: "runtime::bridge-dispatch",
-				"Incoming message {:?} dispatched with result: {:?}",
-				message_id,
-				xcm_outcome,
-			);
-			MessageDispatchResult {
-				dispatch_result: true,
-				unspent_weight: Weight::zero(),
-				dispatch_fee_paid_during_dispatch: false,
+			match xcm_outcome {
+				Ok(outcome) => {
+					log::trace!(
+						target: "runtime::bridge-dispatch",
+						"Incoming message {:?} dispatched with result: {:?}",
+						message_id,
+						outcome,
+					);
+					match outcome.ensure_execution() {
+						Ok(_weight) => (),
+						Err(e) => {
+							log::error!(
+								target: "runtime::bridge-dispatch",
+								"Incoming message {:?} was not dispatched, error: {:?}",
+								message_id,
+								e,
+							);
+						},
+					}
+				},
+				Err(e) => {
+					log::error!(
+						target: "runtime::bridge-dispatch",
+						"Incoming message {:?} was not dispatched, codec error: {:?}",
+						message_id,
+						e,
+					);
+				},
 			}
+
+			MessageDispatchResult { unspent_weight: Weight::zero(), dispatch_level_result: () }
 		}
 	}
 
@@ -533,6 +574,21 @@ pub mod target {
 	/// Return maximal message size given maximal extrinsic size.
 	pub fn maximal_incoming_message_size(maximal_extrinsic_size: u32) -> u32 {
 		maximal_extrinsic_size / 3 * 2
+	}
+
+	/// `SourceHeaderChain` implementation that is using default types and perform default checks.
+	pub struct SourceHeaderChainAdapter<B>(PhantomData<B>);
+
+	impl<B: MessageBridge> SourceHeaderChain for SourceHeaderChainAdapter<B> {
+		type Error = &'static str;
+		type MessagesProof = FromBridgedChainMessagesProof<HashOf<BridgedChain<B>>>;
+
+		fn verify_messages_proof(
+			proof: Self::MessagesProof,
+			messages_count: u32,
+		) -> Result<ProvedMessages<Message>, Self::Error> {
+			verify_messages_proof::<B>(proof, messages_count).map_err(Into::into)
+		}
 	}
 
 	/// Verify proof of Bridged -> This chain messages.
@@ -557,9 +613,9 @@ pub mod target {
 
 		B::BridgedHeaderChain::parse_finalized_storage_proof(
 			bridged_header_hash,
-			StorageProof::new(storage_proof),
+			storage_proof,
 			|storage| {
-				let parser =
+				let mut parser =
 					StorageProofCheckerAdapter::<_, B> { storage, _dummy: Default::default() };
 
 				// receiving proofs where end < begin is ok (if proof includes outbound lane state)
@@ -610,6 +666,12 @@ pub mod target {
 					return Err(MessageProofError::Empty)
 				}
 
+				// check that the storage proof doesn't have any untouched trie nodes
+				parser
+					.storage
+					.ensure_no_unused_nodes()
+					.map_err(MessageProofError::StorageProof)?;
+
 				// We only support single lane messages in this generated_schema
 				let mut proved_messages = ProvedMessages::new();
 				proved_messages.insert(lane, proved_lane_messages);
@@ -635,6 +697,8 @@ pub mod target {
 		FailedToDecodeMessage,
 		/// Failed to decode outbound lane data from the proof.
 		FailedToDecodeOutboundLaneState,
+		/// Storage proof related error.
+		StorageProof(StorageProofError),
 	}
 
 	impl From<MessageProofError> for &'static str {
@@ -649,6 +713,7 @@ pub mod target {
 					"Failed to decode message from the proof",
 				MessageProofError::FailedToDecodeOutboundLaneState =>
 					"Failed to decode outbound lane data from the proof",
+				MessageProofError::StorageProof(_) => "Invalid storage proof",
 			}
 		}
 	}
@@ -659,7 +724,7 @@ pub mod target {
 	}
 
 	impl<H: Hasher, B: MessageBridge> StorageProofCheckerAdapter<H, B> {
-		fn read_raw_outbound_lane_data(&self, lane_id: &LaneId) -> Option<Vec<u8>> {
+		fn read_raw_outbound_lane_data(&mut self, lane_id: &LaneId) -> Option<Vec<u8>> {
 			let storage_outbound_lane_data_key = bp_messages::storage_keys::outbound_lane_data_key(
 				B::BRIDGED_MESSAGES_PALLET_NAME,
 				lane_id,
@@ -667,7 +732,7 @@ pub mod target {
 			self.storage.read_value(storage_outbound_lane_data_key.0.as_ref()).ok()?
 		}
 
-		fn read_raw_message(&self, message_key: &MessageKey) -> Option<Vec<u8>> {
+		fn read_raw_message(&mut self, message_key: &MessageKey) -> Option<Vec<u8>> {
 			let storage_message_key = bp_messages::storage_keys::message_key(
 				B::BRIDGED_MESSAGES_PALLET_NAME,
 				&message_key.lane_id,
@@ -678,209 +743,31 @@ pub mod target {
 	}
 }
 
+/// The `BridgeMessagesCall` used by a chain.
+pub type BridgeMessagesCallOf<C> = bp_messages::BridgeMessagesCall<
+	bp_runtime::AccountIdOf<C>,
+	target::FromBridgedChainMessagesProof<bp_runtime::HashOf<C>>,
+	source::FromBridgedChainMessagesDeliveryProof<bp_runtime::HashOf<C>>,
+>;
+
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::messages_generation::{
-		encode_all_messages, encode_lane_data, prepare_messages_storage_proof,
+	use crate::{
+		messages_generation::{
+			encode_all_messages, encode_lane_data, prepare_messages_storage_proof,
+		},
+		mock::*,
 	};
-	use bp_runtime::HeaderOf;
-	use codec::{Decode, Encode};
-	use frame_support::weights::Weight;
+	use bp_header_chain::StoredHeaderDataBuilder;
+	use bp_runtime::HeaderId;
+	use codec::Encode;
 	use sp_core::H256;
-	use sp_runtime::traits::{BlakeTwo256, Header as _};
-	use std::cell::RefCell;
-
-	const BRIDGED_CHAIN_MIN_EXTRINSIC_WEIGHT: usize = 5;
-	const BRIDGED_CHAIN_MAX_EXTRINSIC_WEIGHT: usize = 2048;
-	const BRIDGED_CHAIN_MAX_EXTRINSIC_SIZE: u32 = 1024;
-
-	/// Bridge that is deployed on ThisChain and allows sending/receiving messages to/from
-	/// BridgedChain.
-	#[derive(Debug, PartialEq, Eq)]
-	struct OnThisChainBridge;
-
-	impl MessageBridge for OnThisChainBridge {
-		const THIS_CHAIN_ID: ChainId = *b"this";
-		const BRIDGED_CHAIN_ID: ChainId = *b"brdg";
-		const BRIDGED_MESSAGES_PALLET_NAME: &'static str = "";
-
-		type ThisChain = ThisChain;
-		type BridgedChain = BridgedChain;
-		type BridgedHeaderChain = BridgedHeaderChain;
-	}
-
-	/// Bridge that is deployed on BridgedChain and allows sending/receiving messages to/from
-	/// ThisChain;
-	#[derive(Debug, PartialEq, Eq)]
-	struct OnBridgedChainBridge;
-
-	impl MessageBridge for OnBridgedChainBridge {
-		const THIS_CHAIN_ID: ChainId = *b"brdg";
-		const BRIDGED_CHAIN_ID: ChainId = *b"this";
-		const BRIDGED_MESSAGES_PALLET_NAME: &'static str = "";
-
-		type ThisChain = BridgedChain;
-		type BridgedChain = ThisChain;
-		type BridgedHeaderChain = ThisHeaderChain;
-	}
-
-	#[derive(Clone, Debug)]
-	struct ThisChainOrigin(Result<frame_system::RawOrigin<ThisChainAccountId>, ()>);
-
-	impl From<ThisChainOrigin>
-		for Result<frame_system::RawOrigin<ThisChainAccountId>, ThisChainOrigin>
-	{
-		fn from(
-			origin: ThisChainOrigin,
-		) -> Result<frame_system::RawOrigin<ThisChainAccountId>, ThisChainOrigin> {
-			origin.clone().0.map_err(|_| origin)
-		}
-	}
-
-	#[derive(Clone, Debug)]
-	struct BridgedChainOrigin;
-
-	impl From<BridgedChainOrigin>
-		for Result<frame_system::RawOrigin<BridgedChainAccountId>, BridgedChainOrigin>
-	{
-		fn from(
-			_origin: BridgedChainOrigin,
-		) -> Result<frame_system::RawOrigin<BridgedChainAccountId>, BridgedChainOrigin> {
-			unreachable!()
-		}
-	}
-
-	struct ThisUnderlyingChain;
-	type ThisChainHeader = sp_runtime::generic::Header<u64, BlakeTwo256>;
-	type ThisChainAccountId = u32;
-	type ThisChainBalance = u32;
-	#[derive(Decode, Encode)]
-	struct ThisChainCall;
-
-	impl Chain for ThisUnderlyingChain {
-		type BlockNumber = u64;
-		type Hash = H256;
-		type Hasher = BlakeTwo256;
-		type Header = ThisChainHeader;
-		type AccountId = ThisChainAccountId;
-		type Balance = ThisChainBalance;
-		type Index = u32;
-		type Signature = sp_runtime::MultiSignature;
-
-		fn max_extrinsic_size() -> u32 {
-			BRIDGED_CHAIN_MAX_EXTRINSIC_SIZE
-		}
-
-		fn max_extrinsic_weight() -> Weight {
-			Weight::zero()
-		}
-	}
-
-	struct ThisChain;
-
-	impl UnderlyingChainProvider for ThisChain {
-		type Chain = ThisUnderlyingChain;
-	}
-
-	impl ThisChainWithMessages for ThisChain {
-		type RuntimeOrigin = ThisChainOrigin;
-		type RuntimeCall = ThisChainCall;
-
-		fn is_message_accepted(_send_origin: &Self::RuntimeOrigin, lane: &LaneId) -> bool {
-			lane == TEST_LANE_ID
-		}
-
-		fn maximal_pending_messages_at_outbound_lane() -> MessageNonce {
-			MAXIMAL_PENDING_MESSAGES_AT_TEST_LANE
-		}
-	}
-
-	impl BridgedChainWithMessages for ThisChain {
-		fn verify_dispatch_weight(_message_payload: &[u8]) -> bool {
-			unreachable!()
-		}
-	}
-
-	struct BridgedUnderlyingChain;
-	type BridgedChainHeader = sp_runtime::generic::Header<u64, BlakeTwo256>;
-	type BridgedChainAccountId = u128;
-	type BridgedChainBalance = u128;
-	#[derive(Decode, Encode)]
-	struct BridgedChainCall;
-
-	impl Chain for BridgedUnderlyingChain {
-		type BlockNumber = u64;
-		type Hash = H256;
-		type Hasher = BlakeTwo256;
-		type Header = BridgedChainHeader;
-		type AccountId = BridgedChainAccountId;
-		type Balance = BridgedChainBalance;
-		type Index = u32;
-		type Signature = sp_runtime::MultiSignature;
-
-		fn max_extrinsic_size() -> u32 {
-			BRIDGED_CHAIN_MAX_EXTRINSIC_SIZE
-		}
-		fn max_extrinsic_weight() -> Weight {
-			Weight::zero()
-		}
-	}
-
-	struct BridgedChain;
-
-	impl UnderlyingChainProvider for BridgedChain {
-		type Chain = BridgedUnderlyingChain;
-	}
-
-	impl ThisChainWithMessages for BridgedChain {
-		type RuntimeOrigin = BridgedChainOrigin;
-		type RuntimeCall = BridgedChainCall;
-
-		fn is_message_accepted(_send_origin: &Self::RuntimeOrigin, _lane: &LaneId) -> bool {
-			unreachable!()
-		}
-
-		fn maximal_pending_messages_at_outbound_lane() -> MessageNonce {
-			unreachable!()
-		}
-	}
-
-	impl BridgedChainWithMessages for BridgedChain {
-		fn verify_dispatch_weight(message_payload: &[u8]) -> bool {
-			message_payload.len() >= BRIDGED_CHAIN_MIN_EXTRINSIC_WEIGHT &&
-				message_payload.len() <= BRIDGED_CHAIN_MAX_EXTRINSIC_WEIGHT
-		}
-	}
-
-	thread_local! {
-		static TEST_BRIDGED_HEADER: RefCell<Option<BridgedChainHeader>> = RefCell::new(None);
-	}
-
-	struct BridgedHeaderChain;
-
-	impl HeaderChain<BridgedUnderlyingChain> for BridgedHeaderChain {
-		fn finalized_header(
-			_hash: HashOf<BridgedChain>,
-		) -> Option<HeaderOf<BridgedUnderlyingChain>> {
-			TEST_BRIDGED_HEADER.with(|h| h.borrow().clone())
-		}
-	}
-
-	struct ThisHeaderChain;
-
-	impl HeaderChain<ThisUnderlyingChain> for ThisHeaderChain {
-		fn finalized_header(_hash: HashOf<ThisChain>) -> Option<HeaderOf<ThisUnderlyingChain>> {
-			unreachable!()
-		}
-	}
+	use sp_runtime::traits::Header as _;
 
 	fn test_lane_outbound_data() -> OutboundLaneData {
 		OutboundLaneData::default()
 	}
-
-	const TEST_LANE_ID: &LaneId = b"test";
-	const MAXIMAL_PENDING_MESSAGES_AT_TEST_LANE: MessageNonce = 32;
 
 	fn regular_outbound_message_payload() -> source::FromThisChainMessagePayload {
 		vec![42]
@@ -890,8 +777,8 @@ mod tests {
 	fn message_is_rejected_when_sent_using_disabled_lane() {
 		assert_eq!(
 			source::FromThisChainMessageVerifier::<OnThisChainBridge>::verify_message(
-				&ThisChainOrigin(Ok(frame_system::RawOrigin::Root)),
-				b"dsbl",
+				&frame_system::RawOrigin::Root.into(),
+				&LaneId(*b"dsbl"),
 				&test_lane_outbound_data(),
 				&regular_outbound_message_payload(),
 			),
@@ -903,8 +790,8 @@ mod tests {
 	fn message_is_rejected_when_there_are_too_many_pending_messages_at_outbound_lane() {
 		assert_eq!(
 			source::FromThisChainMessageVerifier::<OnThisChainBridge>::verify_message(
-				&ThisChainOrigin(Ok(frame_system::RawOrigin::Root)),
-				TEST_LANE_ID,
+				&frame_system::RawOrigin::Root.into(),
+				&TEST_LANE_ID,
 				&OutboundLaneData {
 					latest_received_nonce: 100,
 					latest_generated_nonce: 100 + MAXIMAL_PENDING_MESSAGES_AT_TEST_LANE + 1,
@@ -966,7 +853,7 @@ mod tests {
 		test: impl Fn(target::FromBridgedChainMessagesProof<H256>) -> R,
 	) -> R {
 		let (state_root, storage_proof) = prepare_messages_storage_proof::<OnThisChainBridge>(
-			*TEST_LANE_ID,
+			TEST_LANE_ID,
 			1..=nonces_end,
 			outbound_lane_data,
 			bp_runtime::StorageProofSize::Minimal(0),
@@ -975,22 +862,31 @@ mod tests {
 			encode_outbound_lane_data,
 		);
 
-		TEST_BRIDGED_HEADER.with(|h| {
-			*h.borrow_mut() = Some(BridgedChainHeader::new(
+		sp_io::TestExternalities::new(Default::default()).execute_with(move || {
+			let bridged_header = BridgedChainHeader::new(
 				0,
 				Default::default(),
 				state_root,
 				Default::default(),
 				Default::default(),
-			))
-		});
+			);
+			let bridged_header_hash = bridged_header.hash();
 
-		test(target::FromBridgedChainMessagesProof {
-			bridged_header_hash: Default::default(),
-			storage_proof,
-			lane: *TEST_LANE_ID,
-			nonces_start: 1,
-			nonces_end,
+			pallet_bridge_grandpa::BestFinalized::<TestRuntime>::put(HeaderId(
+				0,
+				bridged_header_hash,
+			));
+			pallet_bridge_grandpa::ImportedHeaders::<TestRuntime>::insert(
+				bridged_header_hash,
+				bridged_header.build(),
+			);
+			test(target::FromBridgedChainMessagesProof {
+				bridged_header_hash,
+				storage_proof,
+				lane: TEST_LANE_ID,
+				nonces_start: 1,
+				nonces_end,
+			})
 		})
 	}
 
@@ -1018,7 +914,9 @@ mod tests {
 	fn message_proof_is_rejected_if_header_is_missing_from_the_chain() {
 		assert_eq!(
 			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |proof| {
-				TEST_BRIDGED_HEADER.with(|h| *h.borrow_mut() = None);
+				let bridged_header_hash =
+					pallet_bridge_grandpa::BestFinalized::<TestRuntime>::get().unwrap().1;
+				pallet_bridge_grandpa::ImportedHeaders::<TestRuntime>::remove(bridged_header_hash);
 				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
 			}),
 			Err(target::MessageProofError::HeaderChain(HeaderChainError::UnknownHeader)),
@@ -1029,11 +927,50 @@ mod tests {
 	fn message_proof_is_rejected_if_header_state_root_mismatches() {
 		assert_eq!(
 			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |proof| {
-				TEST_BRIDGED_HEADER
-					.with(|h| h.borrow_mut().as_mut().unwrap().state_root = Default::default());
+				let bridged_header_hash =
+					pallet_bridge_grandpa::BestFinalized::<TestRuntime>::get().unwrap().1;
+				pallet_bridge_grandpa::ImportedHeaders::<TestRuntime>::insert(
+					bridged_header_hash,
+					BridgedChainHeader::new(
+						0,
+						Default::default(),
+						Default::default(),
+						Default::default(),
+						Default::default(),
+					)
+					.build(),
+				);
 				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
 			}),
-			Err(target::MessageProofError::HeaderChain(HeaderChainError::StorageRootMismatch)),
+			Err(target::MessageProofError::HeaderChain(HeaderChainError::StorageProof(
+				StorageProofError::StorageRootMismatch
+			))),
+		);
+	}
+
+	#[test]
+	fn message_proof_is_rejected_if_it_has_duplicate_trie_nodes() {
+		assert_eq!(
+			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |mut proof| {
+				let node = proof.storage_proof.pop().unwrap();
+				proof.storage_proof.push(node.clone());
+				proof.storage_proof.push(node);
+				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
+			},),
+			Err(target::MessageProofError::HeaderChain(HeaderChainError::StorageProof(
+				StorageProofError::DuplicateNodesInProof
+			))),
+		);
+	}
+
+	#[test]
+	fn message_proof_is_rejected_if_it_has_unused_trie_nodes() {
+		assert_eq!(
+			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |mut proof| {
+				proof.storage_proof.push(vec![42]);
+				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
+			},),
+			Err(target::MessageProofError::StorageProof(StorageProofError::UnusedNodesInTheProof)),
 		);
 	}
 
@@ -1118,7 +1055,7 @@ mod tests {
 				|proof| target::verify_messages_proof::<OnThisChainBridge>(proof, 0),
 			),
 			Ok(vec![(
-				*TEST_LANE_ID,
+				TEST_LANE_ID,
 				ProvedLaneMessages {
 					lane_state: Some(OutboundLaneData {
 						oldest_unpruned_nonce: 1,
@@ -1148,7 +1085,7 @@ mod tests {
 				|proof| target::verify_messages_proof::<OnThisChainBridge>(proof, 1),
 			),
 			Ok(vec![(
-				*TEST_LANE_ID,
+				TEST_LANE_ID,
 				ProvedLaneMessages {
 					lane_state: Some(OutboundLaneData {
 						oldest_unpruned_nonce: 1,
@@ -1156,7 +1093,7 @@ mod tests {
 						latest_generated_nonce: 1,
 					}),
 					messages: vec![Message {
-						key: MessageKey { lane_id: *TEST_LANE_ID, nonce: 1 },
+						key: MessageKey { lane_id: TEST_LANE_ID, nonce: 1 },
 						payload: vec![42],
 					}],
 				},

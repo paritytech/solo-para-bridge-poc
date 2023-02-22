@@ -16,8 +16,8 @@
 
 //! Types used to connect to the Kusama chain.
 
-use frame_support::weights::Weight;
-use relay_substrate_client::{Chain, ChainBase, ChainWithBalances, ChainWithGrandpa};
+use bp_kusama::AccountInfoStorageMapKeyProvider;
+use relay_substrate_client::{Chain, ChainWithBalances, UnderlyingChainProvider};
 use sp_core::storage::StorageKey;
 use std::time::Duration;
 
@@ -28,24 +28,8 @@ pub type HeaderId = relay_utils::HeaderId<bp_kusama::Hash, bp_kusama::BlockNumbe
 #[derive(Debug, Clone, Copy)]
 pub struct Kusama;
 
-impl ChainBase for Kusama {
-	type BlockNumber = bp_kusama::BlockNumber;
-	type Hash = bp_kusama::Hash;
-	type Hasher = bp_kusama::Hasher;
-	type Header = bp_kusama::Header;
-
-	type AccountId = bp_kusama::AccountId;
-	type Balance = bp_kusama::Balance;
-	type Index = bp_kusama::Nonce;
-	type Signature = bp_kusama::Signature;
-
-	fn max_extrinsic_size() -> u32 {
-		bp_kusama::Kusama::max_extrinsic_size()
-	}
-
-	fn max_extrinsic_weight() -> Weight {
-		bp_kusama::Kusama::max_extrinsic_weight()
-	}
+impl UnderlyingChainProvider for Kusama {
+	type Chain = bp_kusama::Kusama;
 }
 
 impl Chain for Kusama {
@@ -59,13 +43,9 @@ impl Chain for Kusama {
 	type Call = ();
 }
 
-impl ChainWithGrandpa for Kusama {
-	const WITH_CHAIN_GRANDPA_PALLET_NAME: &'static str = bp_kusama::WITH_KUSAMA_GRANDPA_PALLET_NAME;
-}
-
 impl ChainWithBalances for Kusama {
 	fn account_info_storage_key(account_id: &Self::AccountId) -> StorageKey {
-		StorageKey(bp_kusama::account_info_storage_key(account_id))
+		AccountInfoStorageMapKeyProvider::final_key(account_id)
 	}
 }
 

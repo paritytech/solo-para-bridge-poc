@@ -27,8 +27,8 @@ use crate::{
 use async_trait::async_trait;
 use finality_relay::TargetClient;
 use relay_substrate_client::{
-	AccountIdOf, AccountKeyPairOf, Chain, Client, Error, HeaderIdOf, HeaderOf, SignParam,
-	SyncHeader, TransactionEra, TransactionTracker, UnsignedTransaction,
+	AccountIdOf, AccountKeyPairOf, Client, Error, HeaderIdOf, HeaderOf, SyncHeader, TransactionEra,
+	TransactionTracker, UnsignedTransaction,
 };
 use relay_utils::relay_loop::Client as RelayClient;
 use sp_core::Pair;
@@ -100,10 +100,10 @@ where
 		Ok(crate::messages_source::read_client_state::<P::TargetChain, P::SourceChain>(
 			&self.client,
 			None,
-			P::SourceChain::BEST_FINALIZED_HEADER_ID_METHOD,
 		)
 		.await?
-		.best_finalized_peer_at_best_self)
+		.best_finalized_peer_at_best_self
+		.ok_or(Error::BridgePalletIsNotInitialized)?)
 	}
 
 	async fn submit_finality_proof(
@@ -111,20 +111,16 @@ where
 		header: SyncHeader<HeaderOf<P::SourceChain>>,
 		proof: SubstrateFinalityProof<P>,
 	) -> Result<Self::TransactionTracker, Error> {
-		let genesis_hash = *self.client.genesis_hash();
+		// runtime module at target chain may require optimized finality proof
+		let proof = P::FinalityEngine::optimize_proof(&self.client, &header, proof).await?;
+
+		// now we may submit optimized finality proof
 		let transaction_params = self.transaction_params.clone();
 		let call =
 			P::SubmitFinalityProofCallBuilder::build_submit_finality_proof_call(header, proof);
-		let (spec_version, transaction_version) = self.client.simple_runtime_version().await?;
 		self.client
 			.submit_and_watch_signed_extrinsic(
-				self.transaction_params.signer.public().into(),
-				SignParam::<P::TargetChain> {
-					spec_version,
-					transaction_version,
-					genesis_hash,
-					signer: transaction_params.signer.clone(),
-				},
+				&self.transaction_params.signer,
 				move |best_block_id, transaction_nonce| {
 					Ok(UnsignedTransaction::new(call.into(), transaction_nonce)
 						.era(TransactionEra::new(best_block_id, transaction_params.mortality)))

@@ -18,10 +18,10 @@
 
 use bp_messages::MessageNonce;
 use codec::{Compact, Decode, Encode};
-use frame_support::weights::Weight;
 use relay_substrate_client::{
-	BalanceOf, Chain, ChainBase, ChainWithBalances, ChainWithGrandpa, ChainWithMessages,
-	ChainWithTransactions, Error as SubstrateError, IndexOf, SignParam, UnsignedTransaction,
+	BalanceOf, Chain, ChainWithBalances, ChainWithMessages, ChainWithTransactions,
+	ChainWithUtilityPallet, Error as SubstrateError, FullRuntimeUtilityPallet, IndexOf, SignParam,
+	UnderlyingChainProvider, UnsignedTransaction,
 };
 use sp_core::{storage::StorageKey, Pair};
 use sp_runtime::{generic::SignedPayload, traits::IdentifyAccount};
@@ -34,33 +34,15 @@ pub type HeaderId = relay_utils::HeaderId<millau_runtime::Hash, millau_runtime::
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Millau;
 
-impl ChainBase for Millau {
-	type BlockNumber = millau_runtime::BlockNumber;
-	type Hash = millau_runtime::Hash;
-	type Hasher = millau_runtime::Hashing;
-	type Header = millau_runtime::Header;
-
-	type AccountId = millau_runtime::AccountId;
-	type Balance = millau_runtime::Balance;
-	type Index = millau_runtime::Index;
-	type Signature = millau_runtime::Signature;
-
-	fn max_extrinsic_size() -> u32 {
-		bp_millau::Millau::max_extrinsic_size()
-	}
-
-	fn max_extrinsic_weight() -> Weight {
-		bp_millau::Millau::max_extrinsic_weight()
-	}
-}
-
-impl ChainWithGrandpa for Millau {
-	const WITH_CHAIN_GRANDPA_PALLET_NAME: &'static str = bp_millau::WITH_MILLAU_GRANDPA_PALLET_NAME;
+impl UnderlyingChainProvider for Millau {
+	type Chain = bp_millau::Millau;
 }
 
 impl ChainWithMessages for Millau {
 	const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str =
 		bp_millau::WITH_MILLAU_MESSAGES_PALLET_NAME;
+	// TODO (https://github.com/paritytech/parity-bridges-common/issues/1692): change the name
+	const WITH_CHAIN_RELAYERS_PALLET_NAME: Option<&'static str> = Some("BridgeRelayers");
 	const TO_CHAIN_MESSAGE_DETAILS_METHOD: &'static str =
 		bp_millau::TO_MILLAU_MESSAGE_DETAILS_METHOD;
 	const FROM_CHAIN_MESSAGE_DETAILS_METHOD: &'static str =
@@ -69,7 +51,6 @@ impl ChainWithMessages for Millau {
 		bp_millau::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
 	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce =
 		bp_millau::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
-	type WeightToFee = bp_millau::WeightToFee;
 	type WeightInfo = ();
 }
 
@@ -114,6 +95,7 @@ impl ChainWithTransactions for Millau {
 				frame_system::CheckWeight::<millau_runtime::Runtime>::new(),
 				pallet_transaction_payment::ChargeTransactionPayment::<millau_runtime::Runtime>::from(unsigned.tip),
 				millau_runtime::BridgeRejectObsoleteHeadersAndMessages,
+				millau_runtime::BridgeRefundRialtoParachainMessages::default(),
 			),
 			(
 				(),
@@ -125,6 +107,7 @@ impl ChainWithTransactions for Millau {
 				(),
 				(),
 				(),
+				()
 			),
 		);
 		let signature = raw_payload.using_encoded(|payload| param.signer.sign(payload));
@@ -162,6 +145,10 @@ impl ChainWithTransactions for Millau {
 			.tip(Compact::<BalanceOf<Self>>::decode(&mut &extra.7.encode()[..]).ok()?.into()),
 		)
 	}
+}
+
+impl ChainWithUtilityPallet for Millau {
+	type UtilityPallet = FullRuntimeUtilityPallet<millau_runtime::Runtime>;
 }
 
 /// Millau signing params.

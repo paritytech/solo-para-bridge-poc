@@ -24,7 +24,7 @@ use bp_messages::{
 use bp_runtime::{decl_bridge_runtime_apis, Chain, Parachain};
 use frame_support::{
 	dispatch::DispatchClass,
-	weights::{constants::WEIGHT_PER_SECOND, IdentityFee, Weight},
+	weights::{constants::WEIGHT_REF_TIME_PER_SECOND, IdentityFee, Weight},
 	RuntimeDebug,
 };
 use frame_system::limits;
@@ -54,8 +54,10 @@ pub const TX_EXTRA_BYTES: u32 = 104;
 /// Maximal weight of single RialtoParachain block.
 ///
 /// This represents two seconds of compute assuming a target block time of six seconds.
-// TODO: https://github.com/paritytech/parity-bridges-common/issues/1543 - remove `set_proof_size`
-pub const MAXIMUM_BLOCK_WEIGHT: Weight = WEIGHT_PER_SECOND.set_proof_size(1_000).saturating_mul(2);
+///
+/// Max PoV size is set to `5Mb` as all Cumulus-based parachains do.
+pub const MAXIMUM_BLOCK_WEIGHT: Weight =
+	Weight::from_parts(WEIGHT_REF_TIME_PER_SECOND.saturating_mul(2), 5 * 1024 * 1024);
 
 /// Represents the portion of a block that will be used by Normal extrinsics.
 pub const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -130,6 +132,8 @@ impl Chain for RialtoParachain {
 impl Parachain for RialtoParachain {
 	const PARACHAIN_ID: u32 = RIALTO_PARACHAIN_ID;
 }
+
+pub use bp_polkadot_core::DefaultSignedExtension as SignedExtension;
 
 frame_support::parameter_types! {
 	pub BlockLength: limits::BlockLength =

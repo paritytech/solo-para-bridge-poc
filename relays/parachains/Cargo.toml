@@ -7,8 +7,8 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 
 [dependencies]
 async-std = "1.6.5"
-async-trait = "0.1.40"
-futures = "0.3.5"
+async-trait = "0.1.64"
+futures = "0.3.26"
 log = "0.4.17"
 relay-utils = { path = "../utils" }
 
@@ -21,4 +21,4 @@ relay-substrate-client = { path = "../client-substrate" }
 [dev-dependencies]
 codec = { package = "parity-scale-codec", version = "3.1.5" }
 relay-substrate-client = { path = "../client-substrate", features = ["test-helpers"] }
-sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-core = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }

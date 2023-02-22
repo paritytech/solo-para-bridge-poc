@@ -16,8 +16,7 @@
 
 //! Types used to connect to the Wococo-Substrate chain.
 
-use frame_support::weights::Weight;
-use relay_substrate_client::{Chain, ChainBase, ChainWithBalances, ChainWithGrandpa, RelayChain};
+use relay_substrate_client::{Chain, ChainWithBalances, RelayChain, UnderlyingChainProvider};
 use sp_core::storage::StorageKey;
 use std::time::Duration;
 
@@ -31,24 +30,8 @@ pub type SyncHeader = relay_substrate_client::SyncHeader<bp_wococo::Header>;
 #[derive(Debug, Clone, Copy)]
 pub struct Wococo;
 
-impl ChainBase for Wococo {
-	type BlockNumber = bp_wococo::BlockNumber;
-	type Hash = bp_wococo::Hash;
-	type Hasher = bp_wococo::Hashing;
-	type Header = bp_wococo::Header;
-
-	type AccountId = bp_wococo::AccountId;
-	type Balance = bp_wococo::Balance;
-	type Index = bp_wococo::Nonce;
-	type Signature = bp_wococo::Signature;
-
-	fn max_extrinsic_size() -> u32 {
-		bp_wococo::Wococo::max_extrinsic_size()
-	}
-
-	fn max_extrinsic_weight() -> Weight {
-		bp_wococo::Wococo::max_extrinsic_weight()
-	}
+impl UnderlyingChainProvider for Wococo {
+	type Chain = bp_wococo::Wococo;
 }
 
 impl Chain for Wococo {
@@ -62,17 +45,13 @@ impl Chain for Wococo {
 	type Call = ();
 }
 
-impl ChainWithGrandpa for Wococo {
-	const WITH_CHAIN_GRANDPA_PALLET_NAME: &'static str = bp_wococo::WITH_WOCOCO_GRANDPA_PALLET_NAME;
-}
-
 impl ChainWithBalances for Wococo {
 	fn account_info_storage_key(account_id: &Self::AccountId) -> StorageKey {
-		StorageKey(bp_wococo::account_info_storage_key(account_id))
+		bp_wococo::AccountInfoStorageMapKeyProvider::final_key(account_id)
 	}
 }
 
 impl RelayChain for Wococo {
 	const PARAS_PALLET_NAME: &'static str = bp_wococo::PARAS_PALLET_NAME;
-	const PARACHAINS_FINALITY_PALLET_NAME: &'static str = "bridgeWococoParachain";
+	const PARACHAINS_FINALITY_PALLET_NAME: &'static str = "BridgeWococoParachain";
 }

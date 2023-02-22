@@ -21,7 +21,7 @@ use crate::{
 	RuntimeOrigin, ShiftSessionManager, Slots, UncheckedExtrinsic,
 };
 
-use frame_support::{parameter_types, traits::KeyOwnerProofSystem, weights::Weight};
+use frame_support::{parameter_types, traits::KeyOwnerProofSystem};
 use frame_system::EnsureRoot;
 use polkadot_primitives::v2::{ValidatorId, ValidatorIndex};
 use polkadot_runtime_common::{paras_registrar, paras_sudo_wrapper, slots};
@@ -123,14 +123,10 @@ impl parachains_session_info::Config for Runtime {
 
 impl parachains_shared::Config for Runtime {}
 
-parameter_types! {
-	pub const FirstMessageFactorPercent: u64 = 100;
-}
-
 impl parachains_ump::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type UmpSink = ();
-	type FirstMessageFactorPercent = FirstMessageFactorPercent;
+	type FirstMessageFactorPercent = frame_support::traits::ConstU64<100>;
 	type ExecuteOverweightOrigin = EnsureRoot<AccountId>;
 	type WeightInfo = parachains_ump::TestWeightInfo;
 }
@@ -167,44 +163,3 @@ impl slots::Config for Runtime {
 }
 
 impl paras_sudo_wrapper::Config for Runtime {}
-
-pub struct ZeroWeights;
-
-impl polkadot_runtime_common::paras_registrar::WeightInfo for ZeroWeights {
-	fn reserve() -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn register() -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn force_register() -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn deregister() -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn swap() -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn schedule_code_upgrade(_: u32) -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn set_current_head(_: u32) -> Weight {
-		Weight::from_ref_time(0)
-	}
-}
-
-impl polkadot_runtime_common::slots::WeightInfo for ZeroWeights {
-	fn force_lease() -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn manage_lease_period_start(_c: u32, _t: u32) -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn clear_all_leases() -> Weight {
-		Weight::from_ref_time(0)
-	}
-	fn trigger_onboard() -> Weight {
-		Weight::from_ref_time(0)
-	}
-}

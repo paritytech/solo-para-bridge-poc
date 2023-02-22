@@ -16,6 +16,7 @@
 
 //! Substrate node RPC errors.
 
+use bp_polkadot_core::parachains::ParaId;
 use jsonrpsee::core::Error as RpcError;
 use relay_utils::MaybeConnectionError;
 use sc_rpc_api::system::Health;
@@ -39,15 +40,18 @@ pub enum Error {
 	/// The response from the server could not be SCALE decoded.
 	#[error("Response parse failed: {0}")]
 	ResponseParseFailed(#[from] codec::Error),
-	/// The Substrate bridge pallet has not yet been initialized.
-	#[error("The Substrate bridge pallet has not been initialized yet.")]
-	UninitializedBridgePallet,
 	/// Account does not exist on the chain.
 	#[error("Account does not exist on the chain.")]
 	AccountDoesNotExist,
 	/// Runtime storage is missing some mandatory value.
 	#[error("Mandatory storage value is missing from the runtime storage.")]
 	MissingMandatoryStorageValue,
+	/// Required parachain head is not present at the relay chain.
+	#[error("Parachain {0:?} head {1} is missing from the relay chain storage.")]
+	MissingRequiredParachainHead(ParaId, u64),
+	/// Failed to find finality proof for the given header.
+	#[error("Failed to find finality proof for header {0}.")]
+	FinalityProofNotFound(u64),
 	/// The client we're connected to is not synced, so we can't rely on its state.
 	#[error("Substrate client is not synced {0}.")]
 	ClientNotSynced(Health),
@@ -57,6 +61,9 @@ pub enum Error {
 	/// The bridge pallet is not yet initialized and all transactions will be rejected.
 	#[error("Bridge pallet is not initialized.")]
 	BridgePalletIsNotInitialized,
+	/// There's no best head of the parachain at the `pallet-bridge-parachains` at the target side.
+	#[error("No head of the ParaId({0}) at the bridge parachains pallet at {1}.")]
+	NoParachainHeadAtTarget(u32, String),
 	/// An error has happened when we have tried to parse storage proof.
 	#[error("Error when parsing storage proof: {0:?}.")]
 	StorageProofError(bp_runtime::StorageProofError),

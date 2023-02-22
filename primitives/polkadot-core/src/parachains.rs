@@ -22,7 +22,7 @@
 //! chains. Having pallets that are referencing polkadot, would mean that there may
 //! be two versions of polkadot crates included in the runtime. Which is bad.
 
-use bp_runtime::Size;
+use bp_runtime::{RawStorageProof, Size};
 use codec::{CompactAs, Decode, Encode, MaxEncodedLen};
 use frame_support::RuntimeDebug;
 use scale_info::TypeInfo;
@@ -66,9 +66,7 @@ impl From<u32> for ParaId {
 ///
 /// This is an equivalent of the `polkadot_parachain::HeadData`.
 ///
-/// The parachain head means (at least in Cumulus) a SCALE-encoded parachain header. Keep in mind
-/// that in Polkadot it is twice-encoded (so `header.encode().encode()`). We'll also do it to keep
-/// it binary-compatible (implies hash-compatibility) with other parachain pallets.
+/// The parachain head means (at least in Cumulus) a SCALE-encoded parachain header.
 #[derive(
 	PartialEq, Eq, Clone, PartialOrd, Ord, Encode, Decode, RuntimeDebug, TypeInfo, Default,
 )]
@@ -90,7 +88,7 @@ pub type ParaHasher = crate::Hasher;
 
 /// Raw storage proof of parachain heads, stored in polkadot-like chain runtime.
 #[derive(Clone, Decode, Encode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-pub struct ParaHeadsProof(pub Vec<Vec<u8>>);
+pub struct ParaHeadsProof(pub RawStorageProof);
 
 impl Size for ParaHeadsProof {
 	fn size(&self) -> u32 {

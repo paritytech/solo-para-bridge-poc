@@ -14,12 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
-use beefy_primitives::crypto::AuthorityId as BeefyId;
 use millau_runtime::{
 	AccountId, AuraConfig, BalancesConfig, BeefyConfig, BridgeRialtoMessagesConfig,
 	BridgeRialtoParachainMessagesConfig, BridgeWestendGrandpaConfig, CouncilConfig, GenesisConfig,
 	GrandpaConfig, SessionConfig, SessionKeys, Signature, SudoConfig, SystemConfig, WASM_BINARY,
 };
+use sp_beefy::crypto::AuthorityId as BeefyId;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{sr25519, Pair, Public};
 use sp_finality_grandpa::AuthorityId as GrandpaId;
@@ -202,7 +202,7 @@ fn testnet_genesis(
 			balances: endowed_accounts.iter().cloned().map(|k| (k, 1 << 50)).collect(),
 		},
 		aura: AuraConfig { authorities: Vec::new() },
-		beefy: BeefyConfig { authorities: Vec::new() },
+		beefy: BeefyConfig::default(),
 		grandpa: GrandpaConfig { authorities: Vec::new() },
 		sudo: SudoConfig { key: Some(root_key) },
 		session: SessionConfig {

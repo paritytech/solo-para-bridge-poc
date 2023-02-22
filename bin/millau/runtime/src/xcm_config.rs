@@ -31,7 +31,8 @@ use bridge_runtime_common::{
 };
 use frame_support::{
 	parameter_types,
-	traits::{Everything, Nothing},
+	traits::{ConstU32, Everything, Nothing},
+	weights::Weight,
 };
 use xcm::latest::prelude::*;
 use xcm_builder::{
@@ -92,12 +93,9 @@ type LocalOriginConverter = (
 	SignedAccountId32AsNative<ThisNetwork, RuntimeOrigin>,
 );
 
-/// The amount of weight an XCM operation takes. This is a safe overestimate.
-pub const BASE_XCM_WEIGHT: u64 = 1_000_000_000;
-
 parameter_types! {
 	/// The amount of weight an XCM operation takes. This is a safe overestimate.
-	pub const BaseXcmWeight: u64 = BASE_XCM_WEIGHT;
+	pub const BaseXcmWeight: Weight = Weight::from_parts(1_000_000_000, 64 * 1024);
 	/// Maximum number of instructions in a single XCM fragment. A sanity check against weight
 	/// calculations getting too crazy.
 	pub const MaxInstructions: u32 = 100;
@@ -111,10 +109,6 @@ pub type XcmRouter = (
 	// Router to send messages to RialtoParachains.
 	XcmBridgeAdapter<ToRialtoParachainBridge>,
 );
-
-parameter_types! {
-	pub const MaxAssetsIntoHolding: u32 = 64;
-}
 
 /// The barriers one of which must be passed for an XCM message to be executed.
 pub type Barrier = (
@@ -149,11 +143,12 @@ impl xcm_executor::Config for XcmConfig {
 	type AssetClaims = XcmPallet;
 	type SubscriptionService = XcmPallet;
 	type PalletInstancesInfo = AllPalletsWithSystem;
-	type MaxAssetsIntoHolding = MaxAssetsIntoHolding;
+	type MaxAssetsIntoHolding = ConstU32<64>;
 	type FeeManager = ();
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
+	type SafeCallFilter = Everything;
 }
 
 /// Type to convert an `Origin` type value into a `MultiLocation` value which represents an interior
@@ -162,6 +157,11 @@ pub type LocalOriginToLocation = (
 	// Usual Signed origin to be used in XCM as a corresponding AccountId32
 	SignedToAccountId32<RuntimeOrigin, AccountId, ThisNetwork>,
 );
+
+#[cfg(feature = "runtime-benchmarks")]
+parameter_types! {
+	pub ReachableDest: Option<MultiLocation> = todo!("We dont use benchmarks for pallet_xcm, so if you hit this message, you need to remove this and define value instead");
+}
 
 impl pallet_xcm::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
@@ -192,6 +192,9 @@ impl pallet_xcm::Config for Runtime {
 	type TrustedLockers = ();
 	type SovereignAccountOf = SovereignAccountOf;
 	type MaxLockers = frame_support::traits::ConstU32<8>;
+	type WeightInfo = pallet_xcm::TestWeightInfo;
+	#[cfg(feature = "runtime-benchmarks")]
+	type ReachableDest = ReachableDest;
 }
 
 /// With-Rialto bridge.
@@ -302,24 +305,20 @@ mod tests {
 			let xcm: Xcm<RuntimeCall> = vec![Instruction::Trap(42)].into();
 
 			let mut incoming_message = DispatchMessage {
-				key: MessageKey { lane_id: [0, 0, 0, 0], nonce: 1 },
+				key: MessageKey { lane_id: LaneId([0, 0, 0, 0]), nonce: 1 },
 				data: DispatchMessageData { payload: Ok((location, xcm).into()) },
 			};
 
 			let dispatch_weight = MessageDispatcher::dispatch_weight(&mut incoming_message);
-			assert_eq!(
-				dispatch_weight,
-				frame_support::weights::Weight::from_ref_time(1_000_000_000)
-			);
+			assert_eq!(dispatch_weight, BaseXcmWeight::get());
 
 			let dispatch_result =
 				MessageDispatcher::dispatch(&AccountId::from([0u8; 32]), incoming_message);
 			assert_eq!(
 				dispatch_result,
 				MessageDispatchResult {
-					dispatch_result: true,
-					unspent_weight: frame_support::weights::Weight::from_ref_time(0),
-					dispatch_fee_paid_during_dispatch: false,
+					unspent_weight: frame_support::weights::Weight::zero(),
+					dispatch_level_result: (),
 				}
 			);
 		})

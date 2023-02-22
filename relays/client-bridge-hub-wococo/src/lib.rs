@@ -16,13 +16,15 @@
 
 //! Types used to connect to the BridgeHub-Wococo-Substrate parachain.
 
-use bp_messages::{MessageNonce, Weight};
+use bp_bridge_hub_wococo::{PolkadotSignedExtension, AVERAGE_BLOCK_INTERVAL};
+use bp_messages::MessageNonce;
 use codec::Encode;
 use relay_substrate_client::{
-	Chain, ChainBase, ChainWithMessages, ChainWithTransactions, Error as SubstrateError, SignParam,
+	Chain, ChainWithBalances, ChainWithMessages, ChainWithTransactions, ChainWithUtilityPallet,
+	Error as SubstrateError, MockedRuntimeUtilityPallet, SignParam, UnderlyingChainProvider,
 	UnsignedTransaction,
 };
-use sp_core::Pair;
+use sp_core::{storage::StorageKey, Pair};
 use sp_runtime::{generic::SignedPayload, traits::IdentifyAccount};
 use std::time::Duration;
 
@@ -34,24 +36,8 @@ pub use runtime_wrapper as runtime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeHubWococo;
 
-impl ChainBase for BridgeHubWococo {
-	type BlockNumber = bp_bridge_hub_wococo::BlockNumber;
-	type Hash = bp_bridge_hub_wococo::Hash;
-	type Hasher = bp_bridge_hub_wococo::Hashing;
-	type Header = bp_bridge_hub_wococo::Header;
-
-	type AccountId = bp_bridge_hub_wococo::AccountId;
-	type Balance = bp_bridge_hub_wococo::Balance;
-	type Index = bp_bridge_hub_wococo::Nonce;
-	type Signature = bp_bridge_hub_wococo::Signature;
-
-	fn max_extrinsic_size() -> u32 {
-		bp_bridge_hub_wococo::BridgeHubWococo::max_extrinsic_size()
-	}
-
-	fn max_extrinsic_weight() -> Weight {
-		bp_bridge_hub_wococo::BridgeHubWococo::max_extrinsic_weight()
-	}
+impl UnderlyingChainProvider for BridgeHubWococo {
+	type Chain = bp_bridge_hub_wococo::BridgeHubWococo;
 }
 
 impl Chain for BridgeHubWococo {
@@ -59,10 +45,20 @@ impl Chain for BridgeHubWococo {
 	const TOKEN_ID: Option<&'static str> = None;
 	const BEST_FINALIZED_HEADER_ID_METHOD: &'static str =
 		bp_bridge_hub_wococo::BEST_FINALIZED_BRIDGE_HUB_WOCOCO_HEADER_METHOD;
-	const AVERAGE_BLOCK_INTERVAL: Duration = Duration::from_secs(6);
+	const AVERAGE_BLOCK_INTERVAL: Duration = AVERAGE_BLOCK_INTERVAL;
 
 	type SignedBlock = bp_bridge_hub_wococo::SignedBlock;
 	type Call = runtime::Call;
+}
+
+impl ChainWithBalances for BridgeHubWococo {
+	fn account_info_storage_key(account_id: &Self::AccountId) -> StorageKey {
+		bp_bridge_hub_wococo::AccountInfoStorageMapKeyProvider::final_key(account_id)
+	}
+}
+
+impl ChainWithUtilityPallet for BridgeHubWococo {
+	type UtilityPallet = MockedRuntimeUtilityPallet<runtime::Call>;
 }
 
 impl ChainWithTransactions for BridgeHubWococo {
@@ -75,7 +71,7 @@ impl ChainWithTransactions for BridgeHubWococo {
 	) -> Result<Self::SignedTransaction, SubstrateError> {
 		let raw_payload = SignedPayload::new(
 			unsigned.call,
-			bp_bridge_hub_wococo::SignedExtensions::new(
+			bp_bridge_hub_wococo::SignedExtension::from_params(
 				param.spec_version,
 				param.transaction_version,
 				unsigned.era,
@@ -119,6 +115,7 @@ impl ChainWithTransactions for BridgeHubWococo {
 impl ChainWithMessages for BridgeHubWococo {
 	const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str =
 		bp_bridge_hub_wococo::WITH_BRIDGE_HUB_WOCOCO_MESSAGES_PALLET_NAME;
+	const WITH_CHAIN_RELAYERS_PALLET_NAME: Option<&'static str> = None;
 
 	const TO_CHAIN_MESSAGE_DETAILS_METHOD: &'static str =
 		bp_bridge_hub_wococo::TO_BRIDGE_HUB_WOCOCO_MESSAGE_DETAILS_METHOD;
@@ -130,7 +127,6 @@ impl ChainWithMessages for BridgeHubWococo {
 	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce =
 		bp_bridge_hub_wococo::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
 
-	type WeightToFee = bp_bridge_hub_wococo::WeightToFee;
 	// TODO: fix (https://github.com/paritytech/parity-bridges-common/issues/1640)
 	type WeightInfo = ();
 }

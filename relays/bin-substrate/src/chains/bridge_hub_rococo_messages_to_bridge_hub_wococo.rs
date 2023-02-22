@@ -17,10 +17,9 @@
 //! BridgeHubRococo-to-BridgeHubWococo messages sync entrypoint.
 
 use crate::cli::bridge::{CliBridgeBase, MessagesCliBridge};
-use bp_messages::Weight;
 use relay_bridge_hub_rococo_client::BridgeHubRococo;
 use relay_bridge_hub_wococo_client::BridgeHubWococo;
-use substrate_relay_helper::messages_lane::SubstrateMessageLane;
+use substrate_relay_helper::{messages_lane::SubstrateMessageLane, UtilityPalletBatchCallBuilder};
 
 pub struct BridgeHubRococoToBridgeHubWococoMessagesCliBridge {}
 
@@ -30,19 +29,17 @@ impl CliBridgeBase for BridgeHubRococoToBridgeHubWococoMessagesCliBridge {
 }
 
 impl MessagesCliBridge for BridgeHubRococoToBridgeHubWococoMessagesCliBridge {
-	const ESTIMATE_MESSAGE_FEE_METHOD: &'static str =
-		"TODO: not needed now, used for send_message and estimate_fee CLI";
 	type MessagesLane = BridgeHubRococoMessagesToBridgeHubWococoMessageLane;
 }
 
-substrate_relay_helper::generate_mocked_receive_message_proof_call_builder!(
+substrate_relay_helper::generate_receive_message_proof_call_builder!(
 	BridgeHubRococoMessagesToBridgeHubWococoMessageLane,
 	BridgeHubRococoMessagesToBridgeHubWococoMessageLaneReceiveMessagesProofCallBuilder,
 	relay_bridge_hub_wococo_client::runtime::Call::BridgeRococoMessages,
 	relay_bridge_hub_wococo_client::runtime::BridgeRococoMessagesCall::receive_messages_proof
 );
 
-substrate_relay_helper::generate_mocked_receive_message_delivery_proof_call_builder!(
+substrate_relay_helper::generate_receive_message_delivery_proof_call_builder!(
 	BridgeHubRococoMessagesToBridgeHubWococoMessageLane,
 	BridgeHubRococoMessagesToBridgeHubWococoMessageLaneReceiveMessagesDeliveryProofCallBuilder,
 	relay_bridge_hub_rococo_client::runtime::Call::BridgeWococoMessages,
@@ -61,4 +58,7 @@ impl SubstrateMessageLane for BridgeHubRococoMessagesToBridgeHubWococoMessageLan
 		BridgeHubRococoMessagesToBridgeHubWococoMessageLaneReceiveMessagesProofCallBuilder;
 	type ReceiveMessagesDeliveryProofCallBuilder =
 		BridgeHubRococoMessagesToBridgeHubWococoMessageLaneReceiveMessagesDeliveryProofCallBuilder;
+
+	type SourceBatchCallBuilder = UtilityPalletBatchCallBuilder<BridgeHubRococo>;
+	type TargetBatchCallBuilder = UtilityPalletBatchCallBuilder<BridgeHubWococo>;
 }

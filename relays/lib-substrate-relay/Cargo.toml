@@ -11,7 +11,8 @@ thiserror = "1.0.26"
 async-std = "1.9.0"
 async-trait = "0.1"
 codec = { package = "parity-scale-codec", version = "3.1.5" }
-futures = "0.3.12"
+futures = "0.3.26"
+hex = "0.4"
 num-traits = "0.2"
 log = "0.4.17"
 
@@ -20,6 +21,7 @@ log = "0.4.17"
 bp-header-chain = { path = "../../primitives/header-chain" }
 bp-parachains = { path = "../../primitives/parachains" }
 bp-polkadot-core = { path = "../../primitives/polkadot-core" }
+bp-relayers = { path = "../../primitives/relayers" }
 bridge-runtime-common = { path = "../../bin/runtime-common" }
 
 finality-grandpa = { version = "0.16.0" }
@@ -38,19 +40,19 @@ bp-messages = { path = "../../primitives/messages" }
 
 # Substrate Dependencies
 
-frame-support = { git = "https://github.com/paritytech/substrate", branch = "master" }
-frame-system = { git = "https://github.com/paritytech/substrate", branch = "master" }
-pallet-balances = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-finality-grandpa = { git = "https://github.com/paritytech/substrate", branch = "master" }
-sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "master" }
+frame-support = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+frame-system = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+pallet-balances = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-core = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-finality-grandpa = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
 
 [dev-dependencies]
-bp-millau = { path = "../../primitives/chain-millau" }
 bp-rialto = { path = "../../primitives/chain-rialto" }
+bp-rialto-parachain = { path = "../../primitives/chain-rialto-parachain" }
 bp-rococo = { path = "../../primitives/chain-rococo" }
 bp-wococo = { path = "../../primitives/chain-wococo" }
-pallet-transaction-payment = { git = "https://github.com/paritytech/substrate", branch = "master" }
+pallet-transaction-payment = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
 relay-rialto-client = { path = "../client-rialto" }
 relay-rococo-client = { path = "../client-rococo" }
 relay-wococo-client = { path = "../client-wococo" }

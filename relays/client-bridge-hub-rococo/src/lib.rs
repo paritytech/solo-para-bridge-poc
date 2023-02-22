@@ -16,13 +16,16 @@
 
 //! Types used to connect to the BridgeHub-Rococo-Substrate parachain.
 
-use bp_messages::{MessageNonce, Weight};
+use bp_bridge_hub_rococo::AVERAGE_BLOCK_INTERVAL;
+use bp_bridge_hub_wococo::PolkadotSignedExtension;
+use bp_messages::MessageNonce;
 use codec::Encode;
 use relay_substrate_client::{
-	Chain, ChainBase, ChainWithMessages, ChainWithTransactions, Error as SubstrateError, SignParam,
+	Chain, ChainWithBalances, ChainWithMessages, ChainWithTransactions, ChainWithUtilityPallet,
+	Error as SubstrateError, MockedRuntimeUtilityPallet, SignParam, UnderlyingChainProvider,
 	UnsignedTransaction,
 };
-use sp_core::Pair;
+use sp_core::{storage::StorageKey, Pair};
 use sp_runtime::{generic::SignedPayload, traits::IdentifyAccount};
 use std::time::Duration;
 
@@ -34,24 +37,8 @@ pub use runtime_wrapper as runtime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeHubRococo;
 
-impl ChainBase for BridgeHubRococo {
-	type BlockNumber = bp_bridge_hub_rococo::BlockNumber;
-	type Hash = bp_bridge_hub_rococo::Hash;
-	type Hasher = bp_bridge_hub_rococo::Hashing;
-	type Header = bp_bridge_hub_rococo::Header;
-
-	type AccountId = bp_bridge_hub_rococo::AccountId;
-	type Balance = bp_bridge_hub_rococo::Balance;
-	type Index = bp_bridge_hub_rococo::Nonce;
-	type Signature = bp_bridge_hub_rococo::Signature;
-
-	fn max_extrinsic_size() -> u32 {
-		bp_bridge_hub_rococo::BridgeHubRococo::max_extrinsic_size()
-	}
-
-	fn max_extrinsic_weight() -> Weight {
-		bp_bridge_hub_rococo::BridgeHubRococo::max_extrinsic_weight()
-	}
+impl UnderlyingChainProvider for BridgeHubRococo {
+	type Chain = bp_bridge_hub_rococo::BridgeHubRococo;
 }
 
 impl Chain for BridgeHubRococo {
@@ -59,10 +46,20 @@ impl Chain for BridgeHubRococo {
 	const TOKEN_ID: Option<&'static str> = None;
 	const BEST_FINALIZED_HEADER_ID_METHOD: &'static str =
 		bp_bridge_hub_rococo::BEST_FINALIZED_BRIDGE_HUB_ROCOCO_HEADER_METHOD;
-	const AVERAGE_BLOCK_INTERVAL: Duration = Duration::from_secs(6);
+	const AVERAGE_BLOCK_INTERVAL: Duration = AVERAGE_BLOCK_INTERVAL;
 
 	type SignedBlock = bp_bridge_hub_rococo::SignedBlock;
 	type Call = runtime::Call;
+}
+
+impl ChainWithBalances for BridgeHubRococo {
+	fn account_info_storage_key(account_id: &Self::AccountId) -> StorageKey {
+		bp_bridge_hub_rococo::AccountInfoStorageMapKeyProvider::final_key(account_id)
+	}
+}
+
+impl ChainWithUtilityPallet for BridgeHubRococo {
+	type UtilityPallet = MockedRuntimeUtilityPallet<runtime::Call>;
 }
 
 impl ChainWithTransactions for BridgeHubRococo {
@@ -75,7 +72,7 @@ impl ChainWithTransactions for BridgeHubRococo {
 	) -> Result<Self::SignedTransaction, SubstrateError> {
 		let raw_payload = SignedPayload::new(
 			unsigned.call,
-			bp_bridge_hub_rococo::SignedExtensions::new(
+			bp_bridge_hub_rococo::SignedExtension::from_params(
 				param.spec_version,
 				param.transaction_version,
 				unsigned.era,
@@ -119,6 +116,7 @@ impl ChainWithTransactions for BridgeHubRococo {
 impl ChainWithMessages for BridgeHubRococo {
 	const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str =
 		bp_bridge_hub_rococo::WITH_BRIDGE_HUB_ROCOCO_MESSAGES_PALLET_NAME;
+	const WITH_CHAIN_RELAYERS_PALLET_NAME: Option<&'static str> = None;
 
 	const TO_CHAIN_MESSAGE_DETAILS_METHOD: &'static str =
 		bp_bridge_hub_rococo::TO_BRIDGE_HUB_ROCOCO_MESSAGE_DETAILS_METHOD;
@@ -130,7 +128,6 @@ impl ChainWithMessages for BridgeHubRococo {
 	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce =
 		bp_bridge_hub_rococo::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
 
-	type WeightToFee = bp_bridge_hub_rococo::WeightToFee;
 	// TODO: fix (https://github.com/paritytech/parity-bridges-common/issues/1640)
 	type WeightInfo = ();
 }
@@ -143,8 +140,10 @@ mod tests {
 	#[test]
 	fn parse_transaction_works() {
 		let unsigned = UnsignedTransaction {
-			call: runtime::Call::System(runtime::SystemCall::remark(b"Hello world!".to_vec()))
-				.into(),
+			call: runtime::Call::System(relay_substrate_client::calls::SystemCall::remark(
+				b"Hello world!".to_vec(),
+			))
+			.into(),
 			nonce: 777,
 			tip: 888,
 			era: TransactionEra::immortal(),

@@ -44,6 +44,8 @@ use crate::{
 		millau_headers_to_rialto_parachain::MillauToRialtoParachainCliBridge,
 		rialto_headers_to_millau::RialtoToMillauCliBridge,
 		rialto_parachains_to_millau::RialtoParachainToMillauCliBridge,
+		rococo_parachains_to_bridge_hub_wococo::BridgeHubRococoToBridgeHubWococoCliBridge,
+		wococo_parachains_to_bridge_hub_rococo::BridgeHubWococoToBridgeHubRococoCliBridge,
 	},
 	cli::{
 		bridge::{
@@ -51,14 +53,16 @@ use crate::{
 			RelayToRelayHeadersCliBridge,
 		},
 		chain_schema::*,
+		relay_headers_and_messages::parachain_to_parachain::ParachainToParachainBridge,
 		CliChain, HexLaneId, PrometheusParams,
 	},
 	declare_chain_cli_schema,
 };
 use bp_messages::LaneId;
-use bp_runtime::{BalanceOf, BlockNumberOf};
+use bp_runtime::BalanceOf;
 use relay_substrate_client::{
-	AccountIdOf, AccountKeyPairOf, Chain, ChainWithBalances, ChainWithTransactions, Client,
+	AccountIdOf, AccountKeyPairOf, Chain, ChainWithBalances, ChainWithMessages,
+	ChainWithTransactions, Client, Parachain,
 };
 use relay_utils::metrics::MetricsParams;
 use sp_core::Pair;
@@ -106,7 +110,7 @@ impl<Left: ChainWithTransactions + CliChain, Right: ChainWithTransactions + CliC
 		right: BridgeEndCommonParams<Right>,
 	) -> anyhow::Result<Self> {
 		// Create metrics registry.
-		let metrics_params = shared.prometheus_params.clone().into();
+		let metrics_params = shared.prometheus_params.clone().into_metrics_params()?;
 		let metrics_params = relay_utils::relay_metrics(metrics_params).into_params();
 
 		Ok(Self { shared, left, right, metrics_params })
@@ -121,8 +125,6 @@ pub struct BridgeEndCommonParams<Chain: ChainWithTransactions + CliChain> {
 	pub sign: AccountKeyPairOf<Chain>,
 	/// Transactions mortality.
 	pub transactions_mortality: Option<u32>,
-	/// Account that "owns" messages pallet.
-	pub messages_pallet_owner: Option<AccountKeyPairOf<Chain>>,
 	/// Accounts, which balances are exposed as metrics by the relay process.
 	pub accounts: Vec<TaggedAccount<AccountIdOf<Chain>>>,
 }
@@ -163,8 +165,8 @@ where
 	/// Returns message relay parameters.
 	fn messages_relay_params(
 		&self,
-		source_to_target_headers_relay: Arc<dyn OnDemandRelay<BlockNumberOf<Source>>>,
-		target_to_source_headers_relay: Arc<dyn OnDemandRelay<BlockNumberOf<Target>>>,
+		source_to_target_headers_relay: Arc<dyn OnDemandRelay<Source, Target>>,
+		target_to_source_headers_relay: Arc<dyn OnDemandRelay<Target, Source>>,
 		lane_id: LaneId,
 	) -> MessagesRelayParams<Bridge::MessagesLane> {
 		MessagesRelayParams {
@@ -190,14 +192,29 @@ where
 declare_chain_cli_schema!(Millau, millau);
 declare_chain_cli_schema!(Rialto, rialto);
 declare_chain_cli_schema!(RialtoParachain, rialto_parachain);
+declare_chain_cli_schema!(Rococo, rococo);
+declare_chain_cli_schema!(BridgeHubRococo, bridge_hub_rococo);
+declare_chain_cli_schema!(Wococo, wococo);
+declare_chain_cli_schema!(BridgeHubWococo, bridge_hub_wococo);
 // Means to override signers of different layer transactions.
 declare_chain_cli_schema!(MillauHeadersToRialto, millau_headers_to_rialto);
 declare_chain_cli_schema!(MillauHeadersToRialtoParachain, millau_headers_to_rialto_parachain);
 declare_chain_cli_schema!(RialtoHeadersToMillau, rialto_headers_to_millau);
 declare_chain_cli_schema!(RialtoParachainsToMillau, rialto_parachains_to_millau);
+declare_chain_cli_schema!(RococoHeadersToBridgeHubWococo, rococo_headers_to_bridge_hub_wococo);
+declare_chain_cli_schema!(
+	RococoParachainsToBridgeHubWococo,
+	rococo_parachains_to_bridge_hub_wococo
+);
+declare_chain_cli_schema!(WococoHeadersToBridgeHubRococo, wococo_headers_to_bridge_hub_rococo);
+declare_chain_cli_schema!(
+	WococoParachainsToBridgeHubRococo,
+	wococo_parachains_to_bridge_hub_rococo
+);
 // All supported bridges.
 declare_relay_to_relay_bridge_schema!(Millau, Rialto);
 declare_relay_to_parachain_bridge_schema!(Millau, RialtoParachain, Rialto);
+declare_parachain_to_parachain_bridge_schema!(BridgeHubRococo, Rococo, BridgeHubWococo, Wococo);
 
 /// Base portion of the bidirectional complex relay.
 ///
@@ -210,9 +227,9 @@ trait Full2WayBridgeBase: Sized + Send + Sync {
 	/// The CLI params for the bridge.
 	type Params;
 	/// The left relay chain.
-	type Left: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Self::Left>>;
+	type Left: ChainWithTransactions + CliChain;
 	/// The right destination chain (it can be a relay or a parachain).
-	type Right: ChainWithTransactions + CliChain<KeyPair = AccountKeyPairOf<Self::Right>>;
+	type Right: ChainWithTransactions + CliChain;
 
 	/// Reference to common relay parameters.
 	fn common(&self) -> &Full2WayBridgeCommonParams<Self::Left, Self::Right>;
@@ -224,8 +241,8 @@ trait Full2WayBridgeBase: Sized + Send + Sync {
 	async fn start_on_demand_headers_relayers(
 		&mut self,
 	) -> anyhow::Result<(
-		Arc<dyn OnDemandRelay<BlockNumberOf<Self::Left>>>,
-		Arc<dyn OnDemandRelay<BlockNumberOf<Self::Right>>>,
+		Arc<dyn OnDemandRelay<Self::Left, Self::Right>>,
+		Arc<dyn OnDemandRelay<Self::Right, Self::Left>>,
 	)>;
 }
 
@@ -242,13 +259,9 @@ where
 	type Base: Full2WayBridgeBase<Left = Self::Left, Right = Self::Right>;
 
 	/// The left relay chain.
-	type Left: ChainWithTransactions
-		+ ChainWithBalances
-		+ CliChain<KeyPair = AccountKeyPairOf<Self::Left>>;
+	type Left: ChainWithTransactions + ChainWithBalances + ChainWithMessages + CliChain;
 	/// The right relay chain.
-	type Right: ChainWithTransactions
-		+ ChainWithBalances
-		+ CliChain<KeyPair = AccountKeyPairOf<Self::Right>>;
+	type Right: ChainWithTransactions + ChainWithBalances + ChainWithMessages + CliChain;
 
 	/// Left to Right bridge.
 	type L2R: MessagesCliBridge<Source = Self::Left, Target = Self::Right>;
@@ -304,28 +317,36 @@ where
 			self.mut_base().start_on_demand_headers_relayers().await?;
 
 		// add balance-related metrics
+		let lanes = self
+			.base()
+			.common()
+			.shared
+			.lane
+			.iter()
+			.cloned()
+			.map(Into::into)
+			.collect::<Vec<_>>();
 		{
 			let common = self.mut_base().mut_common();
-			substrate_relay_helper::messages_metrics::add_relay_balances_metrics(
+			substrate_relay_helper::messages_metrics::add_relay_balances_metrics::<_, Self::Right>(
 				common.left.client.clone(),
 				&mut common.metrics_params,
 				&common.left.accounts,
+				&lanes,
 			)
 			.await?;
-			substrate_relay_helper::messages_metrics::add_relay_balances_metrics(
+			substrate_relay_helper::messages_metrics::add_relay_balances_metrics::<_, Self::Left>(
 				common.right.client.clone(),
 				&mut common.metrics_params,
 				&common.right.accounts,
+				&lanes,
 			)
 			.await?;
 		}
 
-		let lanes = self.base().common().shared.lane.clone();
 		// Need 2x capacity since we consider both directions for each lane
 		let mut message_relays = Vec::with_capacity(lanes.len() * 2);
 		for lane in lanes {
-			let lane = lane.into();
-
 			let left_to_right_messages = substrate_relay_helper::messages_lane::run::<
 				<Self::L2R as MessagesCliBridge>::MessagesLane,
 			>(self.left_to_right().messages_relay_params(
@@ -410,6 +431,32 @@ impl Full2WayBridge for MillauRialtoParachainFull2WayBridge {
 	}
 }
 
+/// BridgeHubRococo <> BridgeHubWococo complex relay.
+pub struct BridgeHubRococoBridgeHubWococoFull2WayBridge {
+	base: <Self as Full2WayBridge>::Base,
+}
+
+#[async_trait]
+impl Full2WayBridge for BridgeHubRococoBridgeHubWococoFull2WayBridge {
+	type Base = ParachainToParachainBridge<Self::L2R, Self::R2L>;
+	type Left = relay_bridge_hub_rococo_client::BridgeHubRococo;
+	type Right = relay_bridge_hub_wococo_client::BridgeHubWococo;
+	type L2R = BridgeHubRococoToBridgeHubWococoCliBridge;
+	type R2L = BridgeHubWococoToBridgeHubRococoCliBridge;
+
+	fn new(base: Self::Base) -> anyhow::Result<Self> {
+		Ok(Self { base })
+	}
+
+	fn base(&self) -> &Self::Base {
+		&self.base
+	}
+
+	fn mut_base(&mut self) -> &mut Self::Base {
+		&mut self.base
+	}
+}
+
 /// Complex headers+messages relay.
 #[derive(Debug, PartialEq, StructOpt)]
 pub enum RelayHeadersAndMessages {
@@ -417,6 +464,8 @@ pub enum RelayHeadersAndMessages {
 	MillauRialto(MillauRialtoHeadersAndMessages),
 	/// Millau <> RialtoParachain relay.
 	MillauRialtoParachain(MillauRialtoParachainHeadersAndMessages),
+	/// BridgeHubRococo <> BridgeHubWococo relay.
+	BridgeHubRococoBridgeHubWococo(BridgeHubRococoBridgeHubWococoHeadersAndMessages),
 }
 
 impl RelayHeadersAndMessages {
@@ -427,6 +476,10 @@ impl RelayHeadersAndMessages {
 				MillauRialtoFull2WayBridge::new(params.into_bridge().await?)?.run().await,
 			RelayHeadersAndMessages::MillauRialtoParachain(params) =>
 				MillauRialtoParachainFull2WayBridge::new(params.into_bridge().await?)?
+					.run()
+					.await,
+			RelayHeadersAndMessages::BridgeHubRococoBridgeHubWococo(params) =>
+				BridgeHubRococoBridgeHubWococoFull2WayBridge::new(params.into_bridge().await?)?
 					.run()
 					.await,
 		}
@@ -449,8 +502,6 @@ mod tests {
 			"9944",
 			"--millau-signer",
 			"//Charlie",
-			"--millau-messages-pallet-owner",
-			"//RialtoMessagesOwner",
 			"--millau-transactions-mortality",
 			"64",
 			"--rialto-host",
@@ -459,8 +510,6 @@ mod tests {
 			"9944",
 			"--rialto-signer",
 			"//Charlie",
-			"--rialto-messages-pallet-owner",
-			"//MillauMessagesOwner",
 			"--rialto-transactions-mortality",
 			"64",
 			"--lane",
@@ -504,10 +553,6 @@ mod tests {
 					millau_signer_password_file: None,
 					millau_transactions_mortality: Some(64),
 				},
-				left_messages_pallet_owner: MillauMessagesPalletOwnerSigningParams {
-					millau_messages_pallet_owner: Some("//RialtoMessagesOwner".into()),
-					millau_messages_pallet_owner_password: None,
-				},
 				left_headers_to_right_sign_override: MillauHeadersToRialtoSigningParams {
 					millau_headers_to_rialto_signer: None,
 					millau_headers_to_rialto_signer_password: None,
@@ -531,10 +576,6 @@ mod tests {
 					rialto_signer_file: None,
 					rialto_signer_password_file: None,
 					rialto_transactions_mortality: Some(64),
-				},
-				right_messages_pallet_owner: RialtoMessagesPalletOwnerSigningParams {
-					rialto_messages_pallet_owner: Some("//MillauMessagesOwner".into()),
-					rialto_messages_pallet_owner_password: None,
 				},
 				right_headers_to_left_sign_override: RialtoHeadersToMillauSigningParams {
 					rialto_headers_to_millau_signer: None,
@@ -561,8 +602,6 @@ mod tests {
 			"//Iden",
 			"--rialto-headers-to-millau-signer",
 			"//Ken",
-			"--millau-messages-pallet-owner",
-			"//RialtoParachainMessagesOwner",
 			"--millau-transactions-mortality",
 			"64",
 			"--rialto-parachain-host",
@@ -571,8 +610,6 @@ mod tests {
 			"9944",
 			"--rialto-parachain-signer",
 			"//George",
-			"--rialto-parachain-messages-pallet-owner",
-			"//MillauMessagesOwner",
 			"--rialto-parachain-transactions-mortality",
 			"64",
 			"--rialto-host",
@@ -616,10 +653,6 @@ mod tests {
 						millau_signer_password_file: None,
 						millau_transactions_mortality: Some(64),
 					},
-					left_messages_pallet_owner: MillauMessagesPalletOwnerSigningParams {
-						millau_messages_pallet_owner: Some("//RialtoParachainMessagesOwner".into()),
-						millau_messages_pallet_owner_password: None,
-					},
 					left_headers_to_right_sign_override:
 						MillauHeadersToRialtoParachainSigningParams {
 							millau_headers_to_rialto_parachain_signer: None,
@@ -644,12 +677,6 @@ mod tests {
 						rialto_parachain_signer_file: None,
 						rialto_parachain_signer_password_file: None,
 						rialto_parachain_transactions_mortality: Some(64),
-					},
-					right_messages_pallet_owner: RialtoParachainMessagesPalletOwnerSigningParams {
-						rialto_parachain_messages_pallet_owner: Some(
-							"//MillauMessagesOwner".into()
-						),
-						rialto_parachain_messages_pallet_owner_password: None,
 					},
 					right_relay_headers_to_left_sign_override: RialtoHeadersToMillauSigningParams {
 						rialto_headers_to_millau_signer: Some("//Ken".into()),

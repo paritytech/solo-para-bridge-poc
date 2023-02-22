@@ -29,7 +29,8 @@ use parachains_relay::{
 	parachains_loop_metrics::ParachainsLoopMetrics,
 };
 use relay_substrate_client::{
-	Chain, Client, Error as SubstrateError, HeaderIdOf, HeaderOf, RelayChain,
+	is_ancient_block, Chain, Client, Error as SubstrateError, HeaderIdOf, HeaderOf, ParachainBase,
+	RelayChain,
 };
 use relay_utils::relay_loop::Client as RelayClient;
 
@@ -107,14 +108,22 @@ where
 		para_id: ParaId,
 	) -> Result<AvailableHeader<ParaHash>, Self::Error> {
 		// we don't need to support many parachains now
-		if para_id.0 != P::SOURCE_PARACHAIN_PARA_ID {
+		if para_id.0 != P::SourceParachain::PARACHAIN_ID {
 			return Err(SubstrateError::Custom(format!(
 				"Parachain id {} is not matching expected {}",
 				para_id.0,
-				P::SOURCE_PARACHAIN_PARA_ID,
+				P::SourceParachain::PARACHAIN_ID,
 			)))
 		}
 
+		// if requested relay header is ancient, then we don't even want to try to read the
+		// parachain head - we simply return `Unavailable`
+		let best_block_number = self.client.best_finalized_header_number().await?;
+		if is_ancient_block(at_block.number(), best_block_number) {
+			return Ok(AvailableHeader::Unavailable)
+		}
+
+		// else - try to read head from the source client
 		let mut para_head_id = AvailableHeader::Missing;
 		if let Some(on_chain_para_head_id) = self.on_chain_para_head_id(at_block, para_id).await? {
 			// Never return head that is larger than requested. This way we'll never sync
@@ -144,11 +153,10 @@ where
 		at_block: HeaderIdOf<P::SourceRelayChain>,
 		parachains: &[ParaId],
 	) -> Result<(ParaHeadsProof, Vec<ParaHash>), Self::Error> {
-		let parachain = ParaId(P::SOURCE_PARACHAIN_PARA_ID);
+		let parachain = ParaId(P::SourceParachain::PARACHAIN_ID);
 		if parachains != [parachain] {
 			return Err(SubstrateError::Custom(format!(
-				"Trying to prove unexpected parachains {:?}. Expected {:?}",
-				parachains, parachain,
+				"Trying to prove unexpected parachains {parachains:?}. Expected {parachain:?}",
 			)))
 		}
 
@@ -177,8 +185,7 @@ where
 			.transpose()?
 			.ok_or_else(|| {
 				SubstrateError::Custom(format!(
-					"Failed to read expected parachain {:?} head at {:?}",
-					parachain, at_block
+					"Failed to read expected parachain {parachain:?} head at {at_block:?}"
 				))
 			})?;
 		let parachain_head_hash = parachain_head.hash();

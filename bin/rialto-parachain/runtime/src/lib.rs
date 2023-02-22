@@ -1,4 +1,4 @@
-// Copyright 2019-2021 Parity Technologies (UK) Ltd.
+	// Copyright 2019-2021 Parity Technologies (UK) Ltd.
 // This file is part of Parity Bridges Common.
 
 // Parity Bridges Common is free software: you can redistribute it and/or modify
@@ -45,14 +45,16 @@ use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
 // A few exports that help ease life for downstream crates.
-use bp_runtime::{HeaderId, HeaderIdProvider};
+use bp_runtime::HeaderId;
 pub use frame_support::{
 	construct_runtime,
 	dispatch::DispatchClass,
 	match_types, parameter_types,
-	traits::{Everything, IsInVec, Nothing, Randomness},
+	traits::{ConstU32, Everything, IsInVec, Nothing, Randomness},
 	weights::{
-		constants::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight, WEIGHT_PER_SECOND},
+		constants::{
+			BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight, WEIGHT_REF_TIME_PER_SECOND,
+		},
 		IdentityFee, Weight,
 	},
 	StorageValue,
@@ -247,8 +249,6 @@ parameter_types! {
 	pub const CreationFee: u128 = MILLIUNIT;
 	pub const TransactionByteFee: u128 = MICROUNIT;
 	pub const OperationalFeeMultiplier: u8 = 5;
-	pub const MaxLocks: u32 = 50;
-	pub const MaxReserves: u32 = 50;
 }
 
 impl pallet_balances::Config for Runtime {
@@ -260,8 +260,8 @@ impl pallet_balances::Config for Runtime {
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
 	type WeightInfo = pallet_balances::weights::SubstrateWeight<Runtime>;
-	type MaxLocks = MaxLocks;
-	type MaxReserves = MaxReserves;
+	type MaxLocks = ConstU32<50>;
+	type MaxReserves = ConstU32<50>;
 	type ReserveIdentifier = [u8; 8];
 }
 
@@ -299,8 +299,6 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 impl parachain_info::Config for Runtime {}
 
 impl cumulus_pallet_aura_ext::Config for Runtime {}
-
-impl pallet_randomness_collective_flip::Config for Runtime {}
 
 parameter_types! {
 	pub const RelayLocation: MultiLocation = MultiLocation::parent();
@@ -366,11 +364,9 @@ pub type XcmOriginToTransactDispatchOrigin = (
 // TODO: until https://github.com/paritytech/parity-bridges-common/issues/1417 is fixed (in either way),
 // the following constant must match the similar constant in the Millau runtime.
 
-/// One XCM operation is `1_000_000_000` weight - almost certainly a conservative estimate.
-pub const BASE_XCM_WEIGHT: u64 = 1_000_000_000;
-
 parameter_types! {
-	pub UnitWeightCost: u64 = BASE_XCM_WEIGHT;
+	/// The amount of weight an XCM operation takes. This is a safe overestimate.
+	pub const UnitWeightCost: Weight = Weight::from_parts(1_000_000, 64 * 1024);
 	// One UNIT buys 1 second of weight.
 	pub const WeightPrice: (MultiLocation, u128) = (MultiLocation::parent(), UNIT);
 	pub const MaxInstructions: u32 = 100;
@@ -419,6 +415,7 @@ impl Config for XcmConfig {
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
+	type SafeCallFilter = Everything;
 }
 
 /// No local origins on this chain are allowed to dispatch XCM sends/executions.
@@ -457,6 +454,11 @@ impl XcmBridge for ToMillauBridge {
 	}
 }
 
+#[cfg(feature = "runtime-benchmarks")]
+parameter_types! {
+	pub ReachableDest: Option<MultiLocation> = todo!("We dont use benchmarks for pallet_xcm, so if you hit this message, you need to remove this and define value instead");
+}
+
 impl pallet_xcm::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type SendXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
@@ -477,6 +479,9 @@ impl pallet_xcm::Config for Runtime {
 	type SovereignAccountOf = ();
 	type MaxLockers = frame_support::traits::ConstU32<8>;
 	type UniversalLocation = UniversalLocation;
+	type WeightInfo = pallet_xcm::TestWeightInfo;
+	#[cfg(feature = "runtime-benchmarks")]
+	type ReachableDest = ReachableDest;
 }
 
 impl cumulus_pallet_xcm::Config for Runtime {
@@ -511,36 +516,20 @@ impl pallet_aura::Config for Runtime {
 impl pallet_bridge_relayers::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Reward = Balance;
-	type PaymentProcedure = bp_relayers::MintReward<pallet_balances::Pallet<Runtime>, AccountId>;
+	type PaymentProcedure =
+		bp_relayers::PayLaneRewardFromAccount<pallet_balances::Pallet<Runtime>, AccountId>;
 	type WeightInfo = ();
-}
-
-parameter_types! {
-	/// This is a pretty unscientific cap.
-	///
-	/// Note that once this is hit the pallet will essentially throttle incoming requests down to one
-	/// call per block.
-	pub const MaxRequests: u32 = 50;
-
-	/// Number of headers to keep.
-	///
-	/// Assuming the worst case of every header being finalized, we will keep headers at least for a
-	/// week.
-	pub const HeadersToKeep: u32 = 7 * bp_millau::DAYS as u32;
-
-	/// Maximal number of authorities at Millau.
-	pub const MaxAuthoritiesAtMillau: u32 = bp_millau::MAX_AUTHORITIES_COUNT;
-	/// Maximal size of SCALE-encoded Millau header.
-	pub const MaxMillauHeaderSize: u32 = bp_millau::MAX_HEADER_SIZE;
 }
 
 pub type MillauGrandpaInstance = ();
 impl pallet_bridge_grandpa::Config for Runtime {
 	type BridgedChain = bp_millau::Millau;
-	type MaxRequests = MaxRequests;
-	type HeadersToKeep = HeadersToKeep;
-	type MaxBridgedAuthorities = MaxAuthoritiesAtMillau;
-	type MaxBridgedHeaderSize = MaxMillauHeaderSize;
+	/// This is a pretty unscientific cap.
+	///
+	/// Note that once this is hit the pallet will essentially throttle incoming requests down to
+	/// one call per block.
+	type MaxRequests = ConstU32<50>;
+	type HeadersToKeep = ConstU32<{ bp_millau::DAYS as u32 }>;
 	type WeightInfo = pallet_bridge_grandpa::weights::BridgeWeight<Runtime>;
 }
 
@@ -570,16 +559,17 @@ impl pallet_bridge_messages::Config<WithMillauMessagesInstance> for Runtime {
 
 	type InboundPayload = crate::millau_messages::FromMillauMessagePayload;
 	type InboundRelayer = bp_millau::AccountId;
+	type DeliveryPayments = ();
 
-	type TargetHeaderChain = crate::millau_messages::Millau;
+	type TargetHeaderChain = crate::millau_messages::MillauAsTargetHeaderChain;
 	type LaneMessageVerifier = crate::millau_messages::ToMillauMessageVerifier;
-	type MessageDeliveryAndDispatchPayment =
-		pallet_bridge_relayers::MessageDeliveryAndDispatchPaymentAdapter<
-			Runtime,
-			WithMillauMessagesInstance,
-		>;
+	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
+		Runtime,
+		frame_support::traits::ConstU128<100_000>,
+		frame_support::traits::ConstU128<100_000>,
+	>;
 
-	type SourceHeaderChain = crate::millau_messages::Millau;
+	type SourceHeaderChain = crate::millau_messages::MillauAsSourceHeaderChain;
 	type MessageDispatch = crate::millau_messages::FromMillauMessageDispatch;
 	type BridgedChainId = BridgedChainId;
 }
@@ -617,7 +607,6 @@ construct_runtime!(
 		System: frame_system::{Pallet, Call, Storage, Config, Event<T>},
 		Timestamp: pallet_timestamp::{Pallet, Call, Storage, Inherent},
 		Sudo: pallet_sudo::{Pallet, Call, Storage, Config<T>, Event<T>},
-		RandomnessCollectiveFlip: pallet_randomness_collective_flip::{Pallet, Storage},
 		TransactionPayment: pallet_transaction_payment::{Pallet, Storage, Event<T>},
 
 		ParachainSystem: cumulus_pallet_parachain_system::{Pallet, Call, Storage, Inherent, Event<T>} = 20,
@@ -751,11 +740,17 @@ impl_runtime_apis! {
 		) -> pallet_transaction_payment::FeeDetails<Balance> {
 			TransactionPayment::query_fee_details(uxt, len)
 		}
+		fn query_weight_to_fee(weight: Weight) -> Balance {
+			TransactionPayment::weight_to_fee(weight)
+		}
+		fn query_length_to_fee(length: u32) -> Balance {
+			TransactionPayment::length_to_fee(length)
+		}
 	}
 
 	impl bp_millau::MillauFinalityApi<Block> for Runtime {
 		fn best_finalized() -> Option<HeaderId<bp_millau::Hash, bp_millau::BlockNumber>> {
-			BridgeMillauGrandpa::best_finalized().map(|header| header.id())
+			BridgeMillauGrandpa::best_finalized()
 		}
 	}
 
@@ -861,11 +856,14 @@ mod tests {
 	use crate::millau_messages::WeightCredit;
 	use bp_messages::{
 		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
-		MessageKey,
+		LaneId, MessageKey,
 	};
 	use bp_runtime::messages::MessageDispatchResult;
-	use bridge_runtime_common::messages::target::FromBridgedChainMessageDispatch;
+	use bridge_runtime_common::{
+		integrity::check_additional_signed, messages::target::FromBridgedChainMessageDispatch,
+	};
 	use codec::Encode;
+	use sp_runtime::generic::Era;
 
 	fn new_test_ext() -> sp_io::TestExternalities {
 		sp_io::TestExternalities::new(
@@ -912,26 +910,43 @@ mod tests {
 			// let xcm: Xcm<RuntimeCall> = vec![Instruction::Trap(42)].into();
 
 			let mut incoming_message = DispatchMessage {
-				key: MessageKey { lane_id: [0, 0, 0, 0], nonce: 1 },
+				key: MessageKey { lane_id: LaneId([0, 0, 0, 0]), nonce: 1 },
 				data: DispatchMessageData { payload: Ok((location, xcm).into()) },
 			};
 
 			let dispatch_weight = MessageDispatcher::dispatch_weight(&mut incoming_message);
-			assert_eq!(
-				dispatch_weight,
-				frame_support::weights::Weight::from_ref_time(1_000_000_000)
-			);
+			assert_eq!(dispatch_weight, UnitWeightCost::get());
 
 			let dispatch_result =
 				MessageDispatcher::dispatch(&AccountId::from([0u8; 32]), incoming_message);
 			assert_eq!(
 				dispatch_result,
 				MessageDispatchResult {
-					dispatch_result: true,
-					unspent_weight: frame_support::weights::Weight::from_ref_time(0),
-					dispatch_fee_paid_during_dispatch: false,
+					unspent_weight: frame_support::weights::Weight::zero(),
+					dispatch_level_result: (),
 				}
 			);
 		})
+	}
+
+	#[test]
+	fn ensure_signed_extension_definition_is_correct() {
+		let payload: SignedExtra = (
+			frame_system::CheckNonZeroSender::new(),
+			frame_system::CheckSpecVersion::new(),
+			frame_system::CheckTxVersion::new(),
+			frame_system::CheckGenesis::new(),
+			frame_system::CheckEra::from(Era::Immortal),
+			frame_system::CheckNonce::from(10),
+			frame_system::CheckWeight::new(),
+			pallet_transaction_payment::ChargeTransactionPayment::from(10),
+		);
+		let indirect_payload = bp_rialto_parachain::SignedExtension::new(
+			((), (), (), (), Era::Immortal, 10.into(), (), 10.into()),
+			None,
+		);
+		assert_eq!(payload.encode(), indirect_payload.encode());
+
+		check_additional_signed::<SignedExtra, bp_rialto_parachain::SignedExtension>();
 	}
 }
