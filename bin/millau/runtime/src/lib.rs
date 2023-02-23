@@ -233,6 +233,8 @@ impl frame_system::Config for Runtime {
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 }
 
+impl pallet_randomness_collective_flip::Config for Runtime {}
+
 impl pallet_aura::Config for Runtime {
 	type AuthorityId = AuraId;
 	type MaxAuthorities = ConstU32<10>;
@@ -891,9 +893,9 @@ impl_runtime_apis! {
 	}
 
 	impl sp_beefy::BeefyApi<Block> for Runtime {
-		/*fn beefy_genesis() -> Option<BlockNumber> {
+		fn beefy_genesis() -> Option<BlockNumber> {
 			Beefy::genesis_block()
-		}*/
+		}
 
 		fn validator_set() -> Option<ValidatorSet<BeefyId>> {
 			Beefy::validator_set()

@@ -49,21 +49,21 @@ substrate-relay-helper = { path = "../lib-substrate-relay" }
 
 # Substrate Dependencies
 
-frame-support = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
-sp-core = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
-sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+frame-support = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "master" }
 
 # Polkadot Dependencies
-polkadot-parachain = { git = "https://github.com/paritytech/polkadot", branch = "release-v0.9.38" }
-polkadot-primitives = { git = "https://github.com/paritytech/polkadot", branch = "release-v0.9.38" }
-polkadot-runtime-common = { git = "https://github.com/paritytech/polkadot", branch = "release-v0.9.38" }
-polkadot-runtime-parachains = { git = "https://github.com/paritytech/polkadot", branch = "release-v0.9.38" }
-xcm = { git = "https://github.com/paritytech/polkadot", branch = "release-v0.9.38", default-features = false }
+polkadot-parachain = { git = "https://github.com/paritytech/polkadot", branch = "master" }
+polkadot-primitives = { git = "https://github.com/paritytech/polkadot", branch = "master" }
+polkadot-runtime-common = { git = "https://github.com/paritytech/polkadot", branch = "master" }
+polkadot-runtime-parachains = { git = "https://github.com/paritytech/polkadot", branch = "master" }
+xcm = { git = "https://github.com/paritytech/polkadot", branch = "master", default-features = false }
 
 
 [dev-dependencies]
 bp-test-utils = { path = "../../primitives/test-utils" }
 hex-literal = "0.3"
-sp-keyring = { git = "https://github.com/paritytech/substrate", branch = "polkadot-v0.9.38" }
+sp-keyring = { git = "https://github.com/paritytech/substrate", branch = "master" }
 tempfile = "3.2"
 finality-grandpa = { version = "0.16.0" }

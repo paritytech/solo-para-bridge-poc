@@ -617,9 +617,9 @@ impl_runtime_apis! {
 	}
 
 	impl sp_beefy::BeefyApi<Block> for Runtime {
-		/*fn beefy_genesis() -> Option<BlockNumber> {
+		fn beefy_genesis() -> Option<BlockNumber> {
 			Beefy::genesis_block()
-		}*/
+		}
 
 		fn validator_set() -> Option<ValidatorSet<BeefyId>> {
 			Beefy::validator_set()

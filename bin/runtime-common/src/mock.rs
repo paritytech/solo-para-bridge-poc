@@ -131,12 +131,9 @@ parameter_types! {
 }
 
 impl frame_system::Config for TestRuntime {
-	type BaseCallFilter = frame_support::traits::Everything;
-	type BlockWeights = ();
-	type BlockLength = ();
 	type RuntimeOrigin = RuntimeOrigin;
-	type RuntimeCall = RuntimeCall;
 	type Index = u64;
+	type RuntimeCall = RuntimeCall;
 	type BlockNumber = ThisChainBlockNumber;
 	type Hash = ThisChainHash;
 	type Hashing = ThisChainHasher;
@@ -145,13 +142,16 @@ impl frame_system::Config for TestRuntime {
 	type Header = ThisChainHeader;
 	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = ConstU32<250>;
-	type DbWeight = DbWeight;
 	type Version = ();
 	type PalletInfo = PalletInfo;
 	type AccountData = pallet_balances::AccountData<ThisChainBalance>;
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
+	type BaseCallFilter = frame_support::traits::Everything;
 	type SystemWeightInfo = ();
+	type BlockWeights = ();
+	type BlockLength = ();
+	type DbWeight = DbWeight;
 	type SS58Prefix = ();
 	type OnSetCode = ();
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
@@ -166,8 +166,8 @@ impl pallet_utility::Config for TestRuntime {
 
 impl pallet_balances::Config for TestRuntime {
 	type Balance = ThisChainBalance;
-	type DustRemoval = ();
 	type RuntimeEvent = RuntimeEvent;
+	type DustRemoval = ();
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
 	type WeightInfo = ();
@@ -177,7 +177,6 @@ impl pallet_balances::Config for TestRuntime {
 }
 
 impl pallet_transaction_payment::Config for TestRuntime {
-	type RuntimeEvent = RuntimeEvent;
 	type OnChargeTransaction = pallet_transaction_payment::CurrencyAdapter<Balances, ()>;
 	type OperationalFeeMultiplier = ConstU8<5>;
 	type WeightToFee = IdentityFee<ThisChainBalance>;
@@ -189,6 +188,7 @@ impl pallet_transaction_payment::Config for TestRuntime {
 		MinimumMultiplier,
 		MaximumMultiplier,
 	>;
+	type RuntimeEvent = RuntimeEvent;
 }
 
 impl pallet_bridge_grandpa::Config for TestRuntime {
@@ -200,41 +200,41 @@ impl pallet_bridge_grandpa::Config for TestRuntime {
 
 impl pallet_bridge_parachains::Config for TestRuntime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_bridge_parachains::weights::BridgeWeight<TestRuntime>;
 	type BridgesGrandpaPalletInstance = ();
 	type ParasPalletName = BridgedParasPalletName;
 	type ParaStoredHeaderDataBuilder =
 		SingleParaStoredHeaderDataBuilder<BridgedUnderlyingParachain>;
 	type HeadsToKeep = ConstU32<8>;
 	type MaxParaHeadDataSize = ConstU32<1024>;
+	type WeightInfo = pallet_bridge_parachains::weights::BridgeWeight<TestRuntime>;
 }
 
 impl pallet_bridge_messages::Config for TestRuntime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_bridge_messages::weights::BridgeWeight<TestRuntime>;
-	type BridgedChainId = BridgedChainId;
 	type ActiveOutboundLanes = ActiveOutboundLanes;
 	type MaxUnrewardedRelayerEntriesAtInboundLane = ConstU64<16>;
-
 	type MaxUnconfirmedMessagesAtInboundLane = ConstU64<16>;
-	type MaximalOutboundPayloadSize = FromThisChainMaximalOutboundPayloadSize<OnThisChainBridge>;
 
+	type MaximalOutboundPayloadSize = FromThisChainMaximalOutboundPayloadSize<OnThisChainBridge>;
 	type OutboundPayload = FromThisChainMessagePayload;
+
 	type InboundPayload = FromBridgedChainMessagePayload<ThisChainRuntimeCall>;
 	type InboundRelayer = BridgedChainAccountId;
-
 	type DeliveryPayments = ();
+
 	type TargetHeaderChain = TargetHeaderChainAdapter<OnThisChainBridge>;
 	type LaneMessageVerifier = FromThisChainMessageVerifier<OnThisChainBridge>;
-
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		TestRuntime,
 		frame_support::traits::ConstU64<100_000>,
 		frame_support::traits::ConstU64<10_000>,
 	>;
+
 	type SourceHeaderChain = SourceHeaderChainAdapter<OnThisChainBridge>;
 	type MessageDispatch =
 		ForbidInboundMessages<(), FromBridgedChainMessagePayload<ThisChainRuntimeCall>>;
+	type BridgedChainId = BridgedChainId;
 }
 
 impl pallet_bridge_relayers::Config for TestRuntime {
