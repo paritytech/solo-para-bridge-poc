@@ -35,22 +35,22 @@ frame_support::construct_runtime!(
 	}
 );
 
-pub type Extrinsic = TestXt<Call, ()>;
+pub type Extrinsic = TestXt<RuntimeCall, ()>;
 
 impl<T> frame_system::offchain::SendTransactionTypes<T> for Test
 where
-	Call: From<T>,
+	RuntimeCall: From<T>,
 {
 	type Extrinsic = Extrinsic;
-	type OverarchingCall = Call;
+	type OverarchingCall = RuntimeCall;
 }
 
 impl system::Config for Test {
 	type BaseCallFilter = frame_support::traits::Everything;
 	type BlockWeights = ();
 	type BlockLength = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -58,7 +58,7 @@ impl system::Config for Test {
 	type AccountId = AccountId32;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = ConstU64<250>;
 	type DbWeight = ();
 	type Version = ();
@@ -77,7 +77,7 @@ impl pallet_balances::Config for Test {
 	type Balance = u128;
 	type DustRemoval = ();
 	/// The ubiquitous event type.
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type ExistentialDeposit = ConstU128<0>;
 	type AccountStore = System;
 	type WeightInfo = pallet_balances::weights::SubstrateWeight<Test>;
@@ -107,7 +107,7 @@ impl<Test: crate::Config> TemplateBridgedXcm<Test> for MockBridging {
 }
 
 impl logic_provider::Config for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type MaxCallPayloadLength = MaxCallPayloadLength;
 	type EnforceBurningTokens = EnforceBurningTokens;
 	type Reward = Reward;
