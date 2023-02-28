@@ -76,7 +76,7 @@ impl pallet_balances::Config for Test {
 	type ReserveIdentifier = [u8; 8];
 }
 
-type MaxParticipants = ConstU32<1>;
+type MaxParticipants = ConstU32<8>;
 
 pub fn get_accounts() -> BoundedVec<AccountId32, MaxParticipants> {
 	let accts = (0_u8..8_u8).map(|id| AccountId32::new([id; 32])).collect::<Vec<AccountId32>>();

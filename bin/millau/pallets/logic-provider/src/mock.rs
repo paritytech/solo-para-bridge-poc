@@ -1,3 +1,4 @@
+use codec::Encode;
 use crate::{self as logic_provider, TemplateBridgedXcm};
 use frame_support::{
 	pallet_prelude::ConstU32,
@@ -17,6 +18,8 @@ use sp_runtime::{
 	testing::{Header, TestXt},
 	traits::{BlakeTwo256, IdentityLookup},
 };
+use xcm::prelude::Here;
+use xcm::v3::{Fungibility, MultiAssets};
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -102,7 +105,12 @@ impl<Test: crate::Config> TemplateBridgedXcm<Test> for MockBridging {
 		_proof: Vec<u8>,
 		_delivery_and_dispatch_fee: u64,
 	) -> Result<([u8; 32], xcm::v3::MultiAssets), xcm::v3::SendError> {
-		unimplemented!()
+
+		// returning success result for testing purpose
+		let fee = MultiAssets::from((Here, Fungibility::Fungible(1_000_000_u128)));
+		let hash =
+			([0u8, 0u8, 0u8, 0u8], 1u64).using_encoded(sp_io::hashing::blake2_256);
+		Ok((hash, fee))
 	}
 }
 
