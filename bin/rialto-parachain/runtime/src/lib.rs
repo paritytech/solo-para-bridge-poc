@@ -866,6 +866,8 @@ mod tests {
 	use bp_runtime::messages::MessageDispatchResult;
 	use bridge_runtime_common::messages::target::FromBridgedChainMessageDispatch;
 	use codec::Encode;
+	//use frame_benchmarking::BenchmarkSelector::ProofSize;
+	use pallet_x_chain::types::State;
 
 	fn new_test_ext() -> sp_io::TestExternalities {
 		sp_io::TestExternalities::new(
@@ -901,15 +903,18 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let location: MultiLocation =
 				(Parent, X1(GlobalConsensus(MillauNetwork::get()))).into();
-			let xcm: Xcm<Call> = vec![Instruction::Transact {
+			let proof: Vec<u8> = State {
+				int_one: 1,
+				int_two: 2
+			}.encode();
+			let xcm = vec![Instruction::Transact {
 				origin_kind: OriginKind::Xcm,
 				require_weight_at_most: 0,
-				call: pallet_x_chain::Call::placeholder::<Runtime> { int_one: 1, int_two: 2 }
+				call: pallet_x_chain::Call::placeholder::<Runtime, pallet_x_chain::Instance1> { proof }
 					.encode()
 					.into(),
 			}]
-			.into();
-			// let xcm: Xcm<RuntimeCall> = vec![Instruction::Trap(42)].into();
+				.into();
 
 			let mut incoming_message = DispatchMessage {
 				key: MessageKey { lane_id: [0, 0, 0, 0], nonce: 1 },

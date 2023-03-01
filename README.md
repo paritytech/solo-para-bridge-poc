@@ -12,6 +12,17 @@ Here is the list of major changes on top of Parity Bridges Common:
 - `./bin/rialto-parachain` is the parachain and contains a pallet which is responsible for storing the data received from the solo-chain.
 - Add XCM bridging example to the runtimes/pallets.
 
+### Note:
+This POC is a forked version of [parity-common-bridges](https://github.com/paritytech/parity-bridges-common) and highly dependent on it.
+
+The versions [bin](bin) module follows currently are:
+- `Substrate: polkadot-v0.9.32`
+- `Cumulus: polkadot-v0.9.32`
+- `Polkadot: release-v0.9.38`
+
+This POC's version upgrades are highly based on [parity-common-bridges](https://github.com/paritytech/parity-bridges-common).
+We'll keep the POC up-to-date with the latest polkadot versions once its parent repository upgrades itself.
+
 ## Some notes on running
 
 Take a look through the docs.

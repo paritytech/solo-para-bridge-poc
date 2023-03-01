@@ -207,10 +207,15 @@ pub mod pallet {
 				if <frame_system::Pallet<T>>::block_number() >=
 					starting_block + T::RevealWindowLength::get().into()
 				{
-					Pallet::<T>::issue_rewards(
+					if let Err(error) = Pallet::<T>::issue_rewards(
 						RawOrigin::None.into(),
 						metadata_id,
-					).unwrap_or_else(|e| log::error!(target: "runtime::template", "Consensus for metadata {} has failed. ({:?})", metadata_id, e));
+					) {
+						log::error!(target: "runtime::template", "Consensus for metadata {} has failed. ({:?})", metadata_id, error);
+						// Consensus not reached.
+						RoundStates::<T>::insert(metadata_id, RoundState::Disputed);
+					}
+
 					pallet_commitments::RevealWindow::<T>::remove(metadata_id);
 				}
 			}
@@ -452,7 +457,7 @@ pub mod pallet {
 				},
 				Err(err) => {
 					// Consensus not reached.
-					RoundStates::<T>::insert(metadata_id, RoundState::Disputed);
+					//RoundStates::<T>::insert(metadata_id, RoundState::Disputed);
 					Err(err.into())
 				},
 			}
