@@ -1,3 +1,4 @@
+use codec::Encode;
 use crate::{self as logic_provider, TemplateBridgedXcm};
 use frame_support::{
 	pallet_prelude::ConstU32,
@@ -17,6 +18,8 @@ use sp_runtime::{
 	testing::{Header, TestXt},
 	traits::{BlakeTwo256, IdentityLookup},
 };
+use xcm::prelude::Here;
+use xcm::v3::{Fungibility, MultiAssets};
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -35,22 +38,22 @@ frame_support::construct_runtime!(
 	}
 );
 
-pub type Extrinsic = TestXt<Call, ()>;
+pub type Extrinsic = TestXt<RuntimeCall, ()>;
 
 impl<T> frame_system::offchain::SendTransactionTypes<T> for Test
 where
-	Call: From<T>,
+	RuntimeCall: From<T>,
 {
 	type Extrinsic = Extrinsic;
-	type OverarchingCall = Call;
+	type OverarchingCall = RuntimeCall;
 }
 
 impl system::Config for Test {
 	type BaseCallFilter = frame_support::traits::Everything;
 	type BlockWeights = ();
 	type BlockLength = ();
-	type Origin = Origin;
-	type Call = Call;
+	type RuntimeOrigin = RuntimeOrigin;
+	type RuntimeCall = RuntimeCall;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -58,7 +61,7 @@ impl system::Config for Test {
 	type AccountId = AccountId32;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = ConstU64<250>;
 	type DbWeight = ();
 	type Version = ();
@@ -77,7 +80,7 @@ impl pallet_balances::Config for Test {
 	type Balance = u128;
 	type DustRemoval = ();
 	/// The ubiquitous event type.
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type ExistentialDeposit = ConstU128<0>;
 	type AccountStore = System;
 	type WeightInfo = pallet_balances::weights::SubstrateWeight<Test>;
@@ -102,12 +105,17 @@ impl<Test: crate::Config> TemplateBridgedXcm<Test> for MockBridging {
 		_proof: Vec<u8>,
 		_delivery_and_dispatch_fee: u64,
 	) -> Result<([u8; 32], xcm::v3::MultiAssets), xcm::v3::SendError> {
-		unimplemented!()
+
+		// returning success result for testing purpose
+		let fee = MultiAssets::from((Here, Fungibility::Fungible(1_000_000_u128)));
+		let hash =
+			([0u8, 0u8, 0u8, 0u8], 1u64).using_encoded(sp_io::hashing::blake2_256);
+		Ok((hash, fee))
 	}
 }
 
 impl logic_provider::Config for Test {
-	type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
 	type MaxCallPayloadLength = MaxCallPayloadLength;
 	type EnforceBurningTokens = EnforceBurningTokens;
 	type Reward = Reward;

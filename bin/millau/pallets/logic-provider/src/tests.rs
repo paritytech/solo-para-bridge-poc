@@ -495,12 +495,11 @@ fn consensus_is_disputed_if_hash_frequency_not_enough() {
 			));
 		}
 
-		// Test the >66% case
-		assert_eq!(
-			Pallet::<Test>::issue_rewards(RawOrigin::None.into(), metadata_id),
-			Err(Error::<Test>::ConsensusNotReached.into())
+		// updating system block for reward issuence
+		System::set_block_number(reveal_window_block + RevealWindowLength::get() as u64);
+		<Pallet<Test> as Hooks<<Test as frame_system::Config>::BlockNumber>>::on_finalize(
+			System::block_number(),
 		);
-
 		assert_eq!(
 			Pallet::<Test>::get_round_state(metadata_id),
 			Some(RoundState::Disputed)
@@ -706,9 +705,14 @@ fn resolve_metadata_dispute_works() {
 			));
 		}
 
-		assert_err!(
-			Pallet::<Test>::issue_rewards(RawOrigin::None.into(), metadata_id),
-			Error::<Test>::ConsensusNotReached
+		// updating system block for reward issuence
+		System::set_block_number(reveal_window_block + RevealWindowLength::get() as u64);
+		<Pallet<Test> as Hooks<<Test as frame_system::Config>::BlockNumber>>::on_finalize(
+			System::block_number(),
+		);
+		assert_eq!(
+			Pallet::<Test>::get_round_state(metadata_id),
+			Some(RoundState::Disputed)
 		);
 
 		// Resolve the dispute using original test_hash
