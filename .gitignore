@@ -4,7 +4,6 @@
 **/rust-toolchain
 hfuzz_target
 hfuzz_workspace
-**/Cargo.lock
 
 **/*.rs.bk
 
