@@ -6,7 +6,7 @@ use std::sync::Arc;
 use primitives::shared::Public;
 use sc_keystore::LocalKeystore;
 use sp_application_crypto::KeyTypeId;
-
+use sp_keystore::Keystore;
 
 #[derive(Debug, PartialEq)]
 pub enum KeyError {
@@ -27,7 +27,7 @@ pub async fn get_public_key(
 ) -> Result<Public, KeyError> {
 	// Some identifier for our cryptographic key type. Doesn't need to be sr25, but can be some
 	// identifier that is specific to this project
-	let local_keys = CryptoStore::sr25519_public_keys(local_keystore.as_ref(), key_type_id).await;
+	let local_keys = Keystore::sr25519_public_keys(local_keystore.as_ref(), key_type_id);
 	// if we've inserted a key into the correct keystore, we'll get the first one(just as an
 	// arbitrary selection)
 	if !local_keys.is_empty() {

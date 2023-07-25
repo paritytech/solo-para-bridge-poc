@@ -23,7 +23,7 @@ pub use weights::*;
 
 pub use primitives::shared::{Hash, LogicProviderCall, MapToCall, MetadataId, Public};
 use sp_core::crypto::AccountId32;
-pub use sp_runtime::RuntimeAppPublic;
+pub use sp_runtime::{RuntimeAppPublic, traits::SaturatedConversion};
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -72,7 +72,7 @@ pub mod pallet {
 		type WeightInfo: WeightInfo;
 		// Outer types
 		type LocalCurrency: Currency<<Self as frame_system::Config>::AccountId>
-			+ LockableCurrency<Self::AccountId, Moment = Self::BlockNumber>;
+			+ LockableCurrency<Self::AccountId, Moment = u64>;
 		type Bridging: crate::TemplateBridgedXcm<Self>;
 	}
 
@@ -123,7 +123,7 @@ pub mod pallet {
 	}
 
 	pub type CommittedSubmissions<T> = BoundedVec<
-		(<T as frame_system::Config>::AccountId, <T as frame_system::Config>::BlockNumber),
+		(<T as frame_system::Config>::AccountId, u64),
 		<T as pallet_commitments::Config>::MaxParticipants,
 	>;
 
@@ -204,8 +204,8 @@ pub mod pallet {
 		// to be scheduled & schedule them.
 		fn on_finalize(_current_block: BlockNumberFor<T>) {
 			for (metadata_id, starting_block) in pallet_commitments::RevealWindow::<T>::iter() {
-				if <frame_system::Pallet<T>>::block_number() >=
-					starting_block + T::RevealWindowLength::get().into()
+				if <frame_system::Pallet<T>>::block_number().saturated_into::<u64>() >=
+					starting_block + T::RevealWindowLength::get() as u64
 				{
 					if let Err(error) = Pallet::<T>::issue_rewards(
 						RawOrigin::None.into(),
@@ -537,7 +537,7 @@ pub mod pallet {
 				metadata_id,
 			) {
 				Ok(_) => {
-					let current_block = <frame_system::Pallet<T>>::block_number();
+					let current_block = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();;
 
 					CommitmentBlockNumbers::<T>::try_mutate(
 						metadata_id,
@@ -560,8 +560,8 @@ pub mod pallet {
 						)
 						.is_none()
 					{
-						let reveal_window_starting_block =
-							current_block + T::RevealWindowLength::get().into();
+						let reveal_window_starting_block: u64 =
+							current_block + T::RevealWindowLength::get() as u64;
 
 						// Designate the first block of the reveal period, where participants can
 						// begin revealing answers

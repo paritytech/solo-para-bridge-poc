@@ -66,6 +66,7 @@ use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 // to be able to use Millau runtime in `bridge-runtime-common` tests
 pub use bridge_runtime_common;
+use codec::Decode;
 
 // A few exports that help ease life for downstream crates.
 pub use frame_support::{
@@ -567,7 +568,7 @@ impl pallet_logic_provider::TemplateBridgedXcm<Runtime> for BridgeRialtoMessages
 		let xcm: Xcm<()> = vec![Instruction::Transact {
 			origin_kind: OriginKind::Xcm,
 			// max weight of call
-			require_weight_at_most: 100000,
+			require_weight_at_most: Weight::from_parts(100000, 0),
 			call: encoded_hardcoded_call.into(),
 		}]
 		.into();
@@ -645,6 +646,8 @@ impl pallet_collective::Config<CouncilCollective> for Runtime {
 	type MaxMembers = CouncilMaxMembers;
 	type DefaultVote = pallet_collective::PrimeDefaultVote;
 	type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
+	type SetMembersOrigin = ();
+	type MaxProposalWeight = ();
 }
 
 const TARGET_X_CHAIN_PALLET_INDEX: u8 = 200;

@@ -127,7 +127,7 @@ pub mod time_units {
 }
 
 /// Block number type used in Millau.
-pub type BlockNumber = u32;
+pub type BlockNumber = u64;
 
 /// Hash type used in Millau.
 // pub type Hash = <BlakeTwoAndKeccak256 as HasherT>::Out;
