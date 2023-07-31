@@ -4,10 +4,7 @@ use sc_client_api::HeaderBackend;
 use sc_client_db::offchain::LocalStorage;
 use sc_keystore::LocalKeystore;
 use sp_api::{ApiError, BlockT, ProvideRuntimeApi};
-use sp_runtime::{
-	generic,
-	offchain::{OffchainStorage, STORAGE_PREFIX},
-};
+use sp_runtime::{generic, offchain::{OffchainStorage, STORAGE_PREFIX}, SaturatedConversion};
 use std::sync::Arc;
 use tokio::{
 	sync::Mutex,
@@ -113,14 +110,14 @@ where
 	C: ProvideRuntimeApi<B> + HeaderBackend<B> + 'static,
 	C::Api: ConstructExtrinsicApi<B> + StorageQueryApi<B>,
 {
-	let current_block = client.info().best_number;
+	let current_block = client.info().best_number.saturated_into::<u64>();
 	let current_hash = client.info().best_hash;
 	let query = client
 		.runtime_api()
 		.get_reveal_window(current_hash, key)?;
 
 	if let Some((window_start, window_end)) = query {
-		Ok(current_block >= window_start.into() && current_block <= window_end.into())
+		Ok(current_block >= window_start && current_block <= window_end)
 	} else {
 		Ok(false)
 	}

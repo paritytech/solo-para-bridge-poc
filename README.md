@@ -34,6 +34,7 @@ Before doing that, run this (builds binaries that are relevant for us):
 make build-all
 ```
 
+### Note:  Due to maintenance, zombienet is not functional at the moment for this repo. For spinning up the `rialto-parachain` network we need to use a traditional approach which is defined [here](https://docs.substrate.io/tutorials/build-a-parachain/).
 1. Build `rialto-bridge-node` in release mode
 2. Download `zombienet` binary release from `zombienet` [GitHub](https://github.com/paritytech/zombienet) page
 3. Move this binary to [this directory](deployments/zombienet)
@@ -280,7 +281,7 @@ And at the Rialto node logs you'll something like this:
 
 ```
 ... runtime::bridge-messages: Received messages: total=1, valid=1. Weight used: Weight(ref_time: 1215065371, proof_size: 48559)/Weight(ref_time: 1215065371, proof_size: 54703).
-``` 
+```
 
 It means that the message has been delivered and dispatched. Message may be dispatched with an
 error, though - the goal of our test bridge is to ensure that messages are successfully delivered

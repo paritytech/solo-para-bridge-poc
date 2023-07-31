@@ -1,7 +1,10 @@
+[settings]
+timeout = 1000
+
 [relaychain]
+chain = "local"
 default_command = "./target/release/rialto-bridge-node"
 
-chain = "local"
 
 [[relaychain.nodes]]
 name = "alice"

@@ -40,8 +40,6 @@ members = [
 	"primitives/test-utils",
 	"primitives/xcm-bridge-hub",
 	"relays/bin-substrate",
-	"relays/client-bridge-hub-kusama",
-	"relays/client-bridge-hub-polkadot",
 	"relays/client-bridge-hub-rococo",
 	"relays/client-bridge-hub-wococo",
 	"relays/client-kusama",

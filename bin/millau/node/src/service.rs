@@ -485,7 +485,7 @@ pub fn new_full(
 			.offchain_storage()
 			.ok_or(ServiceError::Other(String::from("Offchain storage unavailable")))?;
 		let keystore =
-			keystore_container.local_keystore().ok_or(sc_keystore::Error::Unavailable)?;
+			keystore_container.local_keystore();
 
 		// Clone per thread where we plan on continually sharing read/writes
 		let shared_db = Arc::new(Mutex::new(offchain_db.clone()));

@@ -49,7 +49,7 @@ use primitives::shared::MapToCall;
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_beefy::{crypto::AuthorityId as BeefyId, mmr::MmrLeafVersion, ValidatorSet};
-use sp_core::{ConstBool, OpaqueMetadata};
+use sp_core::{ConstBool, H256, OpaqueMetadata};
 use sp_runtime::{
 	create_runtime_str, generic, impl_opaque_keys,
 	traits::{Block as BlockT, IdentityLookup, Keccak256, NumberFor, OpaqueKeys},
@@ -125,7 +125,7 @@ pub type Balance = bp_millau::Balance;
 pub type Nonce = bp_millau::Nonce;
 
 /// A hash of some data used by the chain.
-// pub type Hash = primitives::shared::Hash;
+//pub type Hash = primitives::shared::Hash;
 pub type Hash = bp_millau::Hash;
 
 /// Hashing algorithm used by the chain.
@@ -199,8 +199,8 @@ impl frame_system::Config for Runtime {
 	/// The type for hashing blocks and tries.
 	type Hash = Hash;
 	/// The hashing algorithm used.
-	// type Hashing = Hashing;
-	type Hashing = sp_runtime::traits::BlakeTwo256;
+	type Hashing = Hashing;
+	//type Hashing = sp_runtime::traits::BlakeTwo256;
 	/// The header type.
 	type Block = Block;
 	/// The ubiquitous event type.
@@ -627,13 +627,14 @@ parameter_types! {
 impl pallet_commitments::Config for Runtime {
 	type RevealWindowLength = RevealWindowLength;
 	type MaxParticipants = MaxParticipants;
-	type Hash = Hash;
+	type Hash = H256;
 }
 
 parameter_types! {
 	pub const CouncilMotionDuration: BlockNumber = 5 * bp_millau::DAYS;
 	pub const CouncilMaxProposals: u32 = 100;
 	pub const CouncilMaxMembers: u32 = 100;
+	pub MaxProposalWeight: Weight = Perbill::from_percent(50) * bp_rialto::BlockWeights::get().max_block;
 }
 
 type CouncilCollective = pallet_collective::Instance1;
@@ -646,8 +647,8 @@ impl pallet_collective::Config<CouncilCollective> for Runtime {
 	type MaxMembers = CouncilMaxMembers;
 	type DefaultVote = pallet_collective::PrimeDefaultVote;
 	type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
-	type SetMembersOrigin = ();
-	type MaxProposalWeight = ();
+	type SetMembersOrigin = EnsureRoot<AccountId>;
+	type MaxProposalWeight = MaxProposalWeight;
 }
 
 const TARGET_X_CHAIN_PALLET_INDEX: u8 = 200;

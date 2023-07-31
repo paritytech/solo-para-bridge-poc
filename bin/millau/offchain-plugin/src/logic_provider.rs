@@ -1,7 +1,7 @@
 use codec::Encode;
 use rand::Rng;
 use serde_json::{Map, Value};
-use sp_core::H256;
+use sp_core::{H256};
 use sp_io::hashing::blake2_256;
 use std::{fs::File, io::Read};
 use tokio::sync::MutexGuard;

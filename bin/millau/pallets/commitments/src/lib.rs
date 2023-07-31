@@ -11,7 +11,7 @@ mod tests;
 pub mod pallet {
 	use super::*;
 	use frame_support::{pallet_prelude::*, PalletError};
-	use sp_core::H256;
+	use sp_core::{H256};
 
 	use sp_runtime::traits::{CheckEqual, MaybeDisplay, SimpleBitOps, SaturatedConversion};
 

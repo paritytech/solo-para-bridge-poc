@@ -247,7 +247,7 @@ impl paras_registrar::Config for Runtime {
 }
 
 parameter_types! {
-	pub const LeasePeriod: BlockNumber = 60 * bp_rialto::MINUTES;
+	pub const LeasePeriod: BlockNumber = 10 * bp_rialto::MINUTES;
 }
 
 impl slots::Config for Runtime {

@@ -22,7 +22,7 @@ pub mod shared {
 
 	pub type Hash = sp_core::H256;
 	pub type MetadataId = u64;
-	pub type BlockNumber = u32;
+	pub type BlockNumber = u64;
 
 	pub const PUBLIC_KEY_TYPE_ID: KeyTypeId = KeyTypeId(*b"pubK");
 	sp_application_crypto::app_crypto!(sr25519, PUBLIC_KEY_TYPE_ID);
