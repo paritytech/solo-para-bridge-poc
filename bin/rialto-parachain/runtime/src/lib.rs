@@ -79,7 +79,7 @@ pub use pallet_xcm::Call as XcmCall;
 
 // Polkadot & XCM imports
 use bridge_runtime_common::CustomNetworkId;
-use pallet_xcm::XcmPassthrough;
+use pallet_xcm::{EnsureXcm, XcmPassthrough};
 use polkadot_parachain::primitives::Sibling;
 use xcm::latest::prelude::*;
 use xcm_builder::{
@@ -578,6 +578,28 @@ impl pallet_bridge_messages::Config<WithMillauMessagesInstance> for Runtime {
 	type MessageDispatch = crate::millau_messages::FromMillauMessageDispatch;
 }
 
+match_types! {
+	pub type ChildSoloDLEChain: impl Contains<MultiLocation> = {
+		MultiLocation { parents: 1,
+		// Expect any bridge. This might be fine for now, but may need thought later
+		interior: X1(GlobalConsensus(_)) }
+	};
+}
+impl pallet_x_chain::Config<pallet_x_chain::Instance1> for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type SharedStateAccess = MillauSharedState;
+	type CrossChainOrigin = EnsureXcm<ChildSoloDLEChain>;
+}
+
+parameter_types! {
+	/// Set the max state length to be 2KiB.
+	pub const MaxStateLength: u32 = 2048;
+}
+
+impl pallet_shared_state::Config<pallet_shared_state::Instance1> for Runtime {
+	type MaxStateLength = MaxStateLength;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime {
@@ -604,6 +626,9 @@ construct_runtime!(
 		BridgeRelayers: pallet_bridge_relayers::{Pallet, Call, Storage, Event<T>},
 		BridgeMillauGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage, Event<T>},
 		BridgeMillauMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>},
+
+		MillauSharedState: pallet_shared_state::<Instance1>::{Pallet, Storage},
+		XChain: pallet_x_chain::<Instance1>::{Pallet, Call, Storage, Event<T>} = 200
 	}
 );
 
